@@ -47,6 +47,8 @@ WORKDIR /wolf
 
 ENV CCACHE_DIR=/cache/ccache
 ENV CMAKE_BUILD_DIR=/cache/cmake-build
+ENV HTTPS_PROXY=http://192.168.167.128:7890
+ENV HTTP_PROXY=http://192.168.167.128:7890
 RUN --mount=type=cache,target=/cache/ccache \
     cmake -B$CMAKE_BUILD_DIR \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
