@@ -30,12 +30,12 @@ namespace ba = boost::asio;
  * All ports are derived from a base port, default: 47989
  */
 enum STANDARD_PORTS_MAPPING {
-  HTTPS_PORT = 47984,
-  HTTP_PORT = 47989,
-  CONTROL_PORT = 47999,
-  VIDEO_PING_PORT = 48100,
-  AUDIO_PING_PORT = 48200,
-  RTSP_SETUP_PORT = 48010
+  HTTPS_PORT = 20001,
+  HTTP_PORT = 20006,
+  CONTROL_PORT = 20016,
+  VIDEO_PING_PORT = 20117,
+  AUDIO_PING_PORT = 20217,
+  RTSP_SETUP_PORT = 20027
 };
 
 using PairedClientList = immer::vector<immer::box<wolf::config::PairedClient>>;
