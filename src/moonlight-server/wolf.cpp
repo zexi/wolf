@@ -469,6 +469,7 @@ auto setup_sessions_handlers(const immer::box<state::AppState> &app_state,
  * @brief here's where the magic starts
  */
 void run() {
+  state::init_ports();
   streaming::init(); // Need to initialise gstreamer once
   control::init();   // Need to initialise enet once
   docker::init();    // Need to initialise libcurl once

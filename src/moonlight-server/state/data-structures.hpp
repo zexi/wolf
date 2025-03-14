@@ -5,10 +5,13 @@
 #include <core/audio.hpp>
 #include <core/input.hpp>
 #include <core/virtual-display.hpp>
+#include <cstdlib>
 #include <deque>
 #include <eventbus/event_bus.hpp>
 #include <events/events.hpp>
+#include <exception>
 #include <helpers/tsqueue.hpp>
+#include <helpers/utils.hpp>
 #include <immer/array.hpp>
 #include <immer/atom.hpp>
 #include <immer/box.hpp>
@@ -19,6 +22,7 @@
 #include <openssl/x509.h>
 #include <optional>
 #include <state/serialised_config.hpp>
+#include <string>
 #include <utility>
 
 namespace state {
@@ -29,14 +33,41 @@ namespace ba = boost::asio;
 /**
  * All ports are derived from a base port, default: 47989
  */
-enum STANDARD_PORTS_MAPPING {
+/*enum STANDARD_PORTS_MAPPING {
   HTTPS_PORT = 20001,
   HTTP_PORT = 20006,
   CONTROL_PORT = 20016,
   VIDEO_PING_PORT = 20117,
   AUDIO_PING_PORT = 20217,
   RTSP_SETUP_PORT = 20027
-};
+};*/
+
+int HTTPS_PORT = 47984;
+int HTTP_PORT = 47989;
+int CONTROL_PORT = 47999;
+int VIDEO_PING_PORT = 48100;
+int AUDIO_PING_PORT = 48200;
+int RTSP_SETUP_PORT = 48010;
+
+void init_ports() {
+  auto base_port_str = std::string(utils::get_env("WOLF_BASE_PORT"));
+  if (base_port_str.empty()) {
+    return;
+  }
+  try {
+    int base_https_port = std::stoi(base_port_str);
+    HTTPS_PORT = base_https_port;
+    HTTP_PORT = base_https_port + 5;
+    CONTROL_PORT = base_https_port + 15;
+    VIDEO_PING_PORT = base_https_port + 116;
+    AUDIO_PING_PORT = base_https_port + 216;
+    RTSP_SETUP_PORT = base_https_port + 26;
+  } catch (const std::exception &e) {
+    std::cout << e.what() << std::endl;
+    std::exit(1);
+  }
+  return;
+}
 
 using PairedClientList = immer::vector<immer::box<wolf::config::PairedClient>>;
 
