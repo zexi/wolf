@@ -61,13 +61,21 @@ state::Host get_host_config(std::string_view pkey_filename, std::string_view cer
   if (auto override_mac = utils::get_env("WOLF_INTERNAL_MAC")) {
     mac_address = override_mac;
   }
+  std::optional<std::string> external_ip = std::nullopt;
+  if (auto override_ip = utils::get_env("WOLF_EXTERNAL_IP")) {
+    external_ip = override_ip;
+    logs::log(logs::info, "using WOLF_EXTERNAL_IP: {}", override_ip);
+  } else {
+    external_ip = internal_ip;
+  }
 
   return {state::DISPLAY_CONFIGURATIONS,
           state::AUDIO_CONFIGURATIONS,
           server_cert,
           server_pkey,
           internal_ip,
-          mac_address};
+          mac_address,
+          external_ip};
 }
 
 /**
@@ -393,7 +401,10 @@ auto setup_sessions_handlers(const immer::box<state::AppState> &app_state,
           if (sess->wait_for_ping) {
             auto status = port_fut.wait_for(boost::chrono::milliseconds(DEFAULT_SESSION_TIMEOUT_MILLIS));
             if (status != boost::future_status::ready) {
-              logs::log(logs::warning, "Video session {} timed out waiting for PING", sess->session_id);
+              logs::log(logs::warning,
+                        "Video session {} {} timed out waiting for PING",
+                        sess->session_id,
+                        sess->client_ip);
               return;
             }
             client_port = port_fut.get();
@@ -485,23 +496,23 @@ void run() {
   // HTTP APIs
   auto http_thread = std::thread([local_state]() {
     HttpServer server = HttpServer();
-    HTTPServers::startServer(&server, local_state, state::HTTP_PORT);
+    HTTPServers::startServer(&server, local_state, state::HTTP_PORT());
   });
 
   // HTTPS APIs
   std::thread([local_state, p_key_file, p_cert_file]() {
     HttpsServer server = HttpsServer(p_cert_file, p_key_file);
-    HTTPServers::startServer(&server, local_state, state::HTTPS_PORT);
+    HTTPServers::startServer(&server, local_state, state::HTTPS_PORT());
   }).detach();
 
   // RTSP
   std::thread([sessions = local_state->running_sessions]() {
-    rtsp::run_server(state::RTSP_SETUP_PORT, sessions);
+    rtsp::run_server(state::RTSP_SETUP_PORT(), sessions);
   }).detach();
 
   // Control
   std::thread([sessions = local_state->running_sessions, ev_bus = local_state->event_bus]() {
-    control::run_control(state::CONTROL_PORT, sessions, ev_bus);
+    control::run_control(state::CONTROL_PORT(), sessions, ev_bus);
   }).detach();
 
   // Wolf API server
@@ -518,7 +529,7 @@ void run() {
       mdns_cpp::mDNS mdns;
       mdns.setServiceName("_nvstream._tcp.local.");
       mdns.setServiceHostname(hostname);
-      mdns.setServicePort(state::HTTP_PORT);
+      mdns.setServicePort(state::HTTP_PORT());
       mdns.startService(false);
     } catch (const std::exception &e) {
       logs::log(logs::error, "mDNS error: {}", e.what());

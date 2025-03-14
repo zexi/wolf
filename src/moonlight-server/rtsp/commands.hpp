@@ -121,7 +121,7 @@ RTSP_PACKET setup(const RTSP_PACKET &req, const events::StreamSession &session) 
     service_port = session.video_stream_port;
     break;
   case utils::hash("control"):
-    service_port = state::CONTROL_PORT;
+    service_port = state::CONTROL_PORT();
     break;
   default:
     return error_msg(404, "NOT FOUND", req.seq_number);

@@ -46,6 +46,12 @@ std::string get_host_ip(const std::shared_ptr<typename SimpleWeb::Server<T>::Req
 }
 
 template <class T>
+std::string get_host_external_ip(const std::shared_ptr<typename SimpleWeb::Server<T>::Request> &request,
+                                 const immer::box<state::AppState> &state) {
+  return state->host->external_ip.value_or(request->local_endpoint().address().to_string());
+}
+
+template <class T>
 void serverinfo(const std::shared_ptr<typename SimpleWeb::Server<T>::Response> &response,
                 const std::shared_ptr<typename SimpleWeb::Server<T>::Request> &request,
                 const immer::box<state::AppState> &state) {
@@ -61,16 +67,18 @@ void serverinfo(const std::shared_ptr<typename SimpleWeb::Server<T>::Response> &
   bool is_busy = session.has_value();
   int app_id = session.has_value() ? std::stoi(session->app->base.id) : 0;
 
+  /*auto local_ip = get_host_ip<T>(request, state);*/
   auto local_ip = get_host_ip<T>(request, state);
+  auto external_ip = get_host_external_ip<T>(request, state);
 
   auto xml = moonlight::serverinfo(is_busy,
                                    app_id,
-                                   state::HTTPS_PORT,
-                                   state::HTTP_PORT,
+                                   state::HTTPS_PORT(),
+                                   state::HTTP_PORT(),
                                    cfg->uuid,
                                    cfg->hostname,
                                    utils::lazy_value_or(host->mac_address, [&]() { return get_mac_address(local_ip); }),
-                                   local_ip,
+                                   external_ip,
                                    host->display_modes,
                                    is_https,
                                    cfg->support_hevc,
@@ -433,8 +441,8 @@ void launch(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTPS>::
 
   start_rtp_ping(*new_session);
 
-  auto xml =
-      moonlight::launch_success(get_host_ip<SimpleWeb::HTTPS>(request, state), std::to_string(state::RTSP_SETUP_PORT));
+  auto xml = moonlight::launch_success(get_host_ip<SimpleWeb::HTTPS>(request, state),
+                                       std::to_string(state::RTSP_SETUP_PORT()));
   send_xml<SimpleWeb::HTTPS>(response, SimpleWeb::StatusCode::success_ok, xml);
 }
 
@@ -470,7 +478,7 @@ void resume(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTPS>::
   XML xml;
   xml.put("root.<xmlattr>.status_code", 200);
   xml.put("root.sessionUrl0",
-          "rtsp://"s + get_host_ip<SimpleWeb::HTTPS>(request, state) + ':' + std::to_string(state::RTSP_SETUP_PORT));
+          "rtsp://"s + get_host_ip<SimpleWeb::HTTPS>(request, state) + ':' + std::to_string(state::RTSP_SETUP_PORT()));
   xml.put("root.resume", 1);
   send_xml<SimpleWeb::HTTPS>(response, SimpleWeb::StatusCode::success_ok, xml);
 }

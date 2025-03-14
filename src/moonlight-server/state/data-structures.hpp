@@ -41,33 +41,13 @@ namespace ba = boost::asio;
   AUDIO_PING_PORT = 20217,
   RTSP_SETUP_PORT = 20027
 };*/
-
-int HTTPS_PORT = 47984;
-int HTTP_PORT = 47989;
-int CONTROL_PORT = 47999;
-int VIDEO_PING_PORT = 48100;
-int AUDIO_PING_PORT = 48200;
-int RTSP_SETUP_PORT = 48010;
-
-void init_ports() {
-  auto base_port_str = std::string(utils::get_env("WOLF_BASE_PORT"));
-  if (base_port_str.empty()) {
-    return;
-  }
-  try {
-    int base_https_port = std::stoi(base_port_str);
-    HTTPS_PORT = base_https_port;
-    HTTP_PORT = base_https_port + 5;
-    CONTROL_PORT = base_https_port + 15;
-    VIDEO_PING_PORT = base_https_port + 116;
-    AUDIO_PING_PORT = base_https_port + 216;
-    RTSP_SETUP_PORT = base_https_port + 26;
-  } catch (const std::exception &e) {
-    std::cout << e.what() << std::endl;
-    std::exit(1);
-  }
-  return;
-}
+void init_ports();
+int HTTPS_PORT();
+int HTTP_PORT();
+int CONTROL_PORT();
+int VIDEO_PING_PORT();
+int AUDIO_PING_PORT();
+int RTSP_SETUP_PORT();
 
 using PairedClientList = immer::vector<immer::box<wolf::config::PairedClient>>;
 
@@ -115,6 +95,7 @@ struct Host {
   // Network information can be manually set by users, if not, we'll automatically gather them
   std::optional<std::string> internal_ip;
   std::optional<std::string> mac_address;
+  std::optional<std::string> external_ip;
 };
 
 enum class PAIR_PHASE {

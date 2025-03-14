@@ -57,7 +57,7 @@ inline unsigned short get_next_available_port(const immer::vector<events::Stream
                  return video ? session.video_stream_port : session.audio_stream_port;  //
                })                                                                       //
                | ranges::to_vector;
-  unsigned short port = video ? state::VIDEO_PING_PORT : state::AUDIO_PING_PORT;
+  unsigned short port = video ? state::VIDEO_PING_PORT() : state::AUDIO_PING_PORT();
   while (std::find(ports.begin(), ports.end(), port) != ports.end()) {
     port++;
   }
