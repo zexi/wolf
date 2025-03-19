@@ -141,6 +141,22 @@ std::vector<Container> DockerAPI::get_containers(bool all) const {
   return {};
 }
 
+std::optional<Container> DockerAPI::get_by_name(std::string_view name) const {
+  logs::log(logs::info, "[DOCKER] call get_by_name ...");
+  auto containers = get_containers(false);
+  auto container = std::find_if(containers.begin(), containers.end(), [name](Container &container) {
+    return container.name == name || container.name == fmt::format("/{}", name);
+  });
+  for (auto ctr : containers) {
+    logs::log(logs::info, "[DOCKER] found container {}...", ctr.name);
+    if (ctr.name == name || ctr.name == fmt::format("/{}", name)) {
+      return ctr;
+    }
+  }
+  logs::log(logs::warning, "[DOCKER] not found container by name {}...", name);
+  return {};
+}
+
 void merge_array(json::object *root, const std::string &key, const json::array &vec) {
   if (auto current_obj = root->if_contains(key)) {
     auto current = current_obj->if_array();

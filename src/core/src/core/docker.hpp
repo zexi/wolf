@@ -3,6 +3,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace wolf::core::docker {
@@ -74,6 +75,8 @@ public:
    * @param all: Return all containers. If false, only running containers are shown
    */
   [[nodiscard]] std::vector<Container> get_containers(bool all = true) const;
+
+  [[nodiscard]] std::optional<Container> get_by_name(std::string_view name) const;
 
   /**
    * Get a container

@@ -241,7 +241,7 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
   if (client_id && salt && client_cert_str) {
     auto future_result = pair_phase1(state,
                                      client_ip,
-                                     get_host_ip<SimpleWeb::HTTP>(request, state),
+                                     get_host_external_ip<SimpleWeb::HTTP>(request, state),
                                      client_cert_str.value(),
                                      salt.value(),
                                      cache_key);
@@ -441,7 +441,7 @@ void launch(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTPS>::
 
   start_rtp_ping(*new_session);
 
-  auto xml = moonlight::launch_success(get_host_ip<SimpleWeb::HTTPS>(request, state),
+  auto xml = moonlight::launch_success(get_host_external_ip<SimpleWeb::HTTPS>(request, state),
                                        std::to_string(state::RTSP_SETUP_PORT()));
   send_xml<SimpleWeb::HTTPS>(response, SimpleWeb::StatusCode::success_ok, xml);
 }
@@ -478,7 +478,8 @@ void resume(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTPS>::
   XML xml;
   xml.put("root.<xmlattr>.status_code", 200);
   xml.put("root.sessionUrl0",
-          "rtsp://"s + get_host_ip<SimpleWeb::HTTPS>(request, state) + ':' + std::to_string(state::RTSP_SETUP_PORT()));
+          "rtsp://"s + get_host_external_ip<SimpleWeb::HTTPS>(request, state) + ':' +
+              std::to_string(state::RTSP_SETUP_PORT()));
   xml.put("root.resume", 1);
   send_xml<SimpleWeb::HTTPS>(response, SimpleWeb::StatusCode::success_ok, xml);
 }

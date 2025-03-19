@@ -49,6 +49,7 @@ XML serverinfo(bool isServerBusy,
   resp.put("root.ExternalPort", http_port);
   resp.put("root.mac", mac_address);
   resp.put("root.LocalIP", local_ip);
+  /*resp.put("root.ExternalIP", local_ip);*/
 
   XML display_nodes;
   for (auto mode : display_modes) {

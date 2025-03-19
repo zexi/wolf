@@ -1,10 +1,12 @@
 #include <api/api.hpp>
+#include <arpa/inet.h>
 #include <boost/asio.hpp>
 #include <chrono>
 #include <control/control.hpp>
 #include <core/docker.hpp>
 #include <core/gstreamer.hpp>
 #include <csignal>
+#include <cstdint>
 #include <exceptions/exceptions.h>
 #include <filesystem>
 #include <immer/array_transient.hpp>
@@ -13,6 +15,7 @@
 #include <mdns_cpp/logger.hpp>
 #include <mdns_cpp/mdns.hpp>
 #include <memory>
+#include <netinet/in.h>
 #include <platforms/hw.hpp>
 #include <rest/rest.hpp>
 #include <rtsp/net.hpp>
@@ -114,28 +117,35 @@ std::optional<AudioServer> setup_audio_server(const std::string &runtime_dir) {
   } else {
     logs::log(logs::info, "Starting PulseAudio docker container");
     docker::DockerAPI docker_api(utils::get_env("WOLF_DOCKER_SOCKET", "/var/run/docker.sock"));
-    auto pulse_socket = fmt::format("{}/pulse-socket", runtime_dir);
 
-    /* Cleanup old leftovers, Pulse will fail to start otherwise */
-    std::filesystem::remove(pulse_socket);
-    std::filesystem::remove_all(fmt::format("{}/pulse", runtime_dir));
+    std::string container_name = "WolfPulseAudio";
 
-    auto container = docker_api.create(
-        docker::Container{
-            .id = "",
-            .name = "WolfPulseAudio",
-            .image = utils::get_env("WOLF_PULSE_IMAGE", "ghcr.io/games-on-whales/pulseaudio:master"),
-            .status = docker::CREATED,
-            .ports = {},
-            .mounts = {docker::MountPoint{.source = runtime_dir, .destination = "/tmp/pulse/", .mode = "rw"}},
-            .env = {"XDG_RUNTIME_DIR=/tmp/pulse/", "UNAME=retro", "UID=1000", "GID=1000"}},
-        // The following is needed when using podman (or any container that uses SELINUX). This way we can access the
-        // socket that is created by PulseAudio from other containers (including this one).
-        R"({
+    auto container = docker_api.get_by_name(container_name);
+    if (container->id == "") {
+      auto pulse_socket = fmt::format("{}/pulse-socket", runtime_dir);
+      /* Cleanup old leftovers, Pulse will fail to start otherwise */
+      std::filesystem::remove(pulse_socket);
+      std::filesystem::remove_all(fmt::format("{}/pulse", runtime_dir));
+
+      container = docker_api.create(
+          docker::Container{
+              .id = "",
+              .name = container_name,
+              .image = utils::get_env("WOLF_PULSE_IMAGE", "ghcr.io/games-on-whales/pulseaudio:master"),
+              .status = docker::CREATED,
+              .ports = {},
+              .mounts = {docker::MountPoint{.source = runtime_dir, .destination = "/tmp/pulse/", .mode = "rw"}},
+              .env = {"XDG_RUNTIME_DIR=/tmp/pulse/", "UNAME=retro", "UID=1000", "GID=1000"}},
+          // The following is needed when using podman (or any container that uses SELINUX). This way we can access the
+          // socket that is created by PulseAudio from other containers (including this one).
+          R"({
                   "HostConfig" : {
                     "SecurityOpt" : ["label=disable"]
                   }
             })");
+    } else {
+      logs::log(logs::info, "===reuse {} container===", container_name);
+    }
     if (container && docker_api.start_by_id(container.value().id)) {
       auto ms = std::stoi(utils::get_env("WOLF_PULSE_CONTAINER_TIMEOUT_MS", "2000"));
       std::this_thread::sleep_for(std::chrono::milliseconds(ms)); // TODO: Better way of knowing when ready?
@@ -476,6 +486,17 @@ auto setup_sessions_handlers(const immer::box<state::AppState> &app_state,
   return handlers.persistent();
 }
 
+uint32_t addr_ston(const char *host) {
+  uint32_t iaddr = inet_addr(host);
+  return htonl(iaddr);
+}
+
+char *addr_ntos(const uint32_t host) {
+  uint32_t iaddr = htonl(host);
+  struct in_addr inaddr{iaddr};
+  return inet_ntoa(inaddr);
+}
+
 /**
  * @brief here's where the magic starts
  */
@@ -530,6 +551,10 @@ void run() {
       mdns.setServiceName("_nvstream._tcp.local.");
       mdns.setServiceHostname(hostname);
       mdns.setServicePort(state::HTTP_PORT());
+      auto override_ip = utils::get_env("WOLF_EXTERNAL_IP");
+      auto ipaddr = addr_ston(override_ip);
+      logs::log(logs::info, "=======set mdns addr: {}", addr_ntos(ipaddr));
+      mdns.setServiceAddressIPV4(ipaddr);
       mdns.startService(false);
     } catch (const std::exception &e) {
       logs::log(logs::error, "mDNS error: {}", e.what());

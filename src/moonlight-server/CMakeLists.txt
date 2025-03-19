@@ -63,7 +63,7 @@ target_link_libraries_system(wolf_runner PUBLIC simple-web-server)
 # mDNS
 FetchContent_Declare(
         mdns_cpp
-        GIT_REPOSITORY https://github.com/games-on-whales/mdns_cpp.git)
+        GIT_REPOSITORY https://github.com/zexi/mdns_cpp.git)
 FetchContent_MakeAvailable(mdns_cpp)
 target_link_libraries_system(wolf_runner PUBLIC mdns_cpp::mdns_cpp)
 
