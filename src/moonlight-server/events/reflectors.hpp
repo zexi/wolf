@@ -42,7 +42,7 @@ template <> struct Reflector<events::App> {
     std::string opus_gst_pipeline;
     bool start_virtual_compositor;
     bool start_audio_server;
-    rfl::TaggedUnion<"type", AppCMD, AppDocker, AppChildSession> runner;
+    rfl::TaggedUnion<"type", AppCMD, AppDocker, AppHook, AppChildSession> runner;
   };
 
   static ReflType from(const events::App &v) {
@@ -64,7 +64,7 @@ template <> struct Reflector<events::App> {
 template <> struct Reflector<events::StartRunner> {
   struct ReflType {
     bool stop_stream_when_over;
-    rfl::TaggedUnion<"type", AppCMD, AppDocker, AppChildSession> runner;
+    rfl::TaggedUnion<"type", AppCMD, AppDocker, AppHook, AppChildSession> runner;
     std::string session_id;
   };
 

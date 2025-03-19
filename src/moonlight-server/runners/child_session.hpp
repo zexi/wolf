@@ -25,7 +25,11 @@ public:
            const immer::map<std::string, std::string> &env_variables,
            std::string_view render_node) override;
 
-  rfl::TaggedUnion<"type", wolf::config::AppCMD, wolf::config::AppDocker, wolf::config::AppChildSession>
+  rfl::TaggedUnion<"type",
+                   wolf::config::AppCMD,
+                   wolf::config::AppDocker,
+                   wolf::config::AppHook,
+                   wolf::config::AppChildSession>
   serialize() override {
     return wolf::config::AppChildSession{.parent_session_id = std::to_string(parent_session_id)};
   }

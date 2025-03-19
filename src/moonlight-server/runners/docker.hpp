@@ -1,4 +1,5 @@
 #pragma once
+#include "state/serialised_config.hpp"
 #include <boost/thread/thread.hpp>
 #include <chrono>
 #include <control/control.hpp>
@@ -92,7 +93,11 @@ public:
            const immer::map<std::string, std::string> &env_variables,
            std::string_view render_node) override;
 
-  rfl::TaggedUnion<"type", wolf::config::AppCMD, wolf::config::AppDocker, wolf::config::AppChildSession>
+  rfl::TaggedUnion<"type",
+                   wolf::config::AppCMD,
+                   wolf::config::AppDocker,
+                   wolf::config::AppHook,
+                   wolf::config::AppChildSession>
   serialize() override {
     return wolf::config::AppDocker{
         .name = container.name,

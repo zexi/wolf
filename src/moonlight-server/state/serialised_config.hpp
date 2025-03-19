@@ -79,6 +79,13 @@ struct AppDocker {
   std::optional<std::string> base_create_json;
 };
 
+struct AppHook {
+  using Tag = rfl::Literal<"hook", "Hook">;
+  std::string name;
+  std::vector<std::string> env;
+  std::string endpoint;
+};
+
 struct AppChildSession {
   using Tag = rfl::Literal<"child_session">;
   std::string parent_session_id;
@@ -108,7 +115,7 @@ struct BaseApp {
   std::optional<BaseAppAudioOverride> audio;
   std::optional<bool> start_virtual_compositor;
   std::optional<bool> start_audio_server;
-  rfl::TaggedUnion<"type", AppCMD, AppDocker, AppChildSession> runner =
+  rfl::TaggedUnion<"type", AppCMD, AppDocker, AppHook, AppChildSession> runner =
       AppCMD{}; // We have to provide a default or rfl::DefaultIfMissing will fail
 };
 

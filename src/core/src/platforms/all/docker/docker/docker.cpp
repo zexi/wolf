@@ -12,12 +12,6 @@ using namespace ranges;
 using namespace utils;
 namespace json = boost::json;
 
-enum METHOD : int {
-  GET,
-  POST,
-  DELETE
-};
-
 void init() {
   curl_global_init(CURL_GLOBAL_ALL);
 }

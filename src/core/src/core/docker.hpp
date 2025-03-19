@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdlib>
+#include <curl/curl.h>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -60,6 +61,19 @@ struct Container {
  * CURL needs to be initialised once
  */
 void init();
+
+enum METHOD : int {
+  GET,
+  POST,
+  DELETE
+};
+
+std::optional<std::pair<long /* response_code */, std::string /* raw message */>>
+req(CURL *handle,
+    METHOD method,
+    std::string_view target,
+    std::string_view post_body,
+    const std::vector<std::string> &header_params);
 
 class DockerAPI {
 private:

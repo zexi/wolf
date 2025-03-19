@@ -1,22 +1,21 @@
 #pragma once
+
 #include "state/serialised_config.hpp"
-#include <boost/process.hpp>
-#include <core/input.hpp>
-#include <eventbus/event_bus.hpp>
+#include <events/events.hpp>
 #include <immer/box.hpp>
 #include <memory>
-#include <state/data-structures.hpp>
-#include <string>
-#include <thread>
+#include <utility>
 
-namespace process {
+namespace wolf::core::hook {
 
+using namespace std::chrono_literals;
+using namespace ranges::views;
 using namespace wolf::core;
 
-class RunProcess : public events::Runner {
+class RunHook : public events::Runner {
 public:
-  explicit RunProcess(std::shared_ptr<events::EventBusType> ev_bus, std::string run_cmd)
-      : run_cmd(std::move(run_cmd)), ev_bus(std::move(ev_bus)) {}
+  RunHook(std::shared_ptr<events::EventBusType> ev_bus, std::vector<std::string> env, std::string endpoint)
+      : ev_bus(std::move(ev_bus)), env(std::move(env)), endpoint(std::move(endpoint)) {}
 
   void run(std::size_t session_id,
            std::string_view app_state_folder,
@@ -32,13 +31,13 @@ public:
                    wolf::config::AppHook,
                    wolf::config::AppChildSession>
   serialize() override {
-    return wolf::config::AppCMD{.run_cmd = run_cmd};
+    return wolf::config::AppHook{.env = env};
   }
 
-protected:
-  std::string run_cmd;
+private:
   std::shared_ptr<events::EventBusType> ev_bus;
+  std::vector<std::string> env;
+  std::string endpoint;
 };
-namespace bp = boost::process;
 
-} // namespace process
+} // namespace wolf::core::hook

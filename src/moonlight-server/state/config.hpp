@@ -1,5 +1,7 @@
 #pragma once
 
+#include "rfl/Variant.hpp"
+#include "state/serialised_config.hpp"
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
@@ -8,6 +10,7 @@
 #include <helpers/logger.hpp>
 #include <runners/child_session.hpp>
 #include <runners/docker.hpp>
+#include <runners/hook.hpp>
 #include <runners/process.hpp>
 #include <state/data-structures.hpp>
 
@@ -119,7 +122,7 @@ inline std::string gen_uuid() {
 }
 
 static std::shared_ptr<events::Runner>
-get_runner(const rfl::TaggedUnion<"type", AppCMD, AppDocker, AppChildSession> &runner,
+get_runner(const rfl::TaggedUnion<"type", AppCMD, AppDocker, AppHook, AppChildSession> &runner,
            const std::shared_ptr<events::EventBusType> &ev_bus,
            state::SessionsAtoms running_sessions) {
   if (rfl::holds_alternative<AppCMD>(runner.variant())) {
@@ -131,6 +134,11 @@ get_runner(const rfl::TaggedUnion<"type", AppCMD, AppDocker, AppChildSession> &r
   } else if (rfl::holds_alternative<AppChildSession>(runner.variant())) {
     auto session_id = rfl::get<AppChildSession>(runner.variant()).parent_session_id;
     return std::make_shared<coop::RunChildSession>(std::stoul(session_id), ev_bus, running_sessions);
+  } else if (rfl::holds_alternative<AppHook>(runner.variant())) {
+    auto cfg = rfl::get<AppHook>(runner.variant());
+    auto env = cfg.env;
+    auto endpoint = cfg.endpoint;
+    return std::make_shared<hook::RunHook>(ev_bus, env, endpoint);
   } else {
     logs::log(logs::error, "Found runner of unknown type");
     throw std::runtime_error("Unknown runner type");
