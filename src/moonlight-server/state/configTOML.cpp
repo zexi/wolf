@@ -7,6 +7,7 @@
 #include <range/v3/view.hpp>
 #include <rfl/toml.hpp>
 #include <state/config.hpp>
+#include <unistd.h>
 #include <utility>
 
 namespace state {
@@ -15,18 +16,27 @@ namespace state {
  * A bit of magic here, it'll load up the default/config.toml via Cmake (look for `make_includable`)
  */
 constexpr char const *default_toml =
-#include "default/config.include.toml"
+#include "default/config.hook.toml"
 
     ;
 
 using namespace std::literals;
 using namespace wolf::config;
 
+inline std::string gen_hostname() {
+  char hostname[256];
+  if (gethostname(hostname, sizeof(hostname)) == 0) {
+    return std::string(hostname);
+  }
+  return "unknown";
+}
+
 void create_default(const std::string &source) {
   std::ofstream out_file;
   out_file.open(source);
   out_file << "# A unique identifier for this host" << std::endl;
   out_file << "uuid = \"" << gen_uuid() << "\"" << std::endl;
+  out_file << "hostname = \"" << gen_hostname() << "\"" << std::endl;
   out_file << default_toml;
   out_file.close();
 }
