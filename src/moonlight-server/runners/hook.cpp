@@ -37,6 +37,29 @@ std::string get_status(std::string_view url) {
   return "UNKNOWN";
 }
 
+void create_udev_hw_files(std::string_view endpoint,
+                          std::filesystem::path base_hw_db_path,
+                          std::vector<std::pair<std::string, std::vector<std::string>>> udev_hw_db_entries) {
+  auto url = fmt::format("{}/write-hwdb", endpoint);
+  for (const auto &[filename, content] : udev_hw_db_entries) {
+    auto host_file_path = (base_hw_db_path / filename).string();
+    logs::log(logs::debug, "[HOOK] Writing hwdb file: {}", host_file_path);
+    auto body = json::object();
+    body["path"] = host_file_path;
+    body["content"] = utils::join(content, "\n");
+    auto raw_msg = request(docker::POST, url, false, json::serialize(body));
+    if (raw_msg && (raw_msg->first == 200)) {
+      logs::log(logs::info, "[HOOK] call write-hwdb {} hook: {} - {}", host_file_path, raw_msg->first, raw_msg->second);
+    } else {
+      logs::log(logs::error,
+                "[HOOK] call write-hwdb {} hook error: {} - {}",
+                host_file_path,
+                raw_msg->first,
+                raw_msg->second);
+    }
+  }
+}
+
 void RunHook::run(std::size_t session_id,
                   std::string_view app_state_folder,
                   std::shared_ptr<events::devices_atom_queue> plugged_devices_queue,
@@ -44,8 +67,32 @@ void RunHook::run(std::size_t session_id,
                   const immer::array<std::pair<std::string, std::string>> &paths,
                   const immer::map<std::string, std::string> &env_variables,
                   std::string_view render_node) {
+  // Fake udev
+  // auto udev_base_path = std::filesystem::path(app_state_folder) / "udev";
+  auto udev_base_path = std::filesystem::path("/run") / "udev";
+  auto hw_db_path = udev_base_path / "data";
+  auto fake_udev_cli_path = std::string(utils::get_env("WOLF_DOCKER_FAKE_UDEV_PATH", ""));
+  bool use_fake_udev = !fake_udev_cli_path.empty() || std::filesystem::exists(fake_udev_cli_path);
+  if (use_fake_udev) {
+    // logs::log(logs::info, "[HOOK] Using fake-udev, creating {}", hw_db_path.string());
+    // std::filesystem::create_directories(hw_db_path);
 
-  logs::log(logs::info, "[HOOK] Using fake-udev, creating env {}", env_variables);
+    // Check if /run/udev/control exists
+    /*auto udev_ctrl_path = udev_base_path / "control";
+    if (!std::filesystem::exists(udev_ctrl_path)) {
+      if (auto control_file = std::ofstream(udev_ctrl_path)) {
+        control_file.close();
+        std::filesystem::permissions(udev_ctrl_path, std::filesystem::perms::all); // set 777
+      }
+    }*/
+    // mounts.push_back(MountPoint{.source = udev_base_path.string(), .destination = "/run/udev/", .mode = "rw"});
+    // mounts.push_back(MountPoint{.source = fake_udev_cli_path, .destination = "/usr/bin/fake-udev", .mode = "ro"});
+  } else {
+    logs::log(logs::warning,
+              "[HOOK] Unable to use fake-udev, check the env variable WOLF_DOCKER_FAKE_UDEV_PATH and the file at {}",
+              fake_udev_cli_path);
+  }
+
   logs::log(logs::info, "[HOOK] this->env: {}, this->endpoint: {}", this->env, this->endpoint);
 
   auto url = fmt::format("{}/start", this->endpoint);
@@ -102,6 +149,9 @@ void RunHook::run(std::size_t session_id,
       if (device_ev->get().session_id != session_id) {
         continue;
       }
+      if (use_fake_udev) {
+        create_udev_hw_files(this->endpoint, hw_db_path, device_ev->get().udev_hw_db_entries);
+      }
       logs::log(logs::info, "[HOOK] plugin event session {}", session_id);
       for (auto udev_ev : device_ev->get().udev_events) {
         std::string cmd;
@@ -117,7 +167,17 @@ void RunHook::run(std::size_t session_id,
                             udev_msg);
         }
         logs::log(logs::debug, "[HOOK] Executing command: {}", cmd);
-        /*docker_api.exec(container_id, {"/bin/bash", "-c", cmd}, "root");*/
+        auto exec_body = json::object();
+        exec_body["cmd"] = "/bin/bash";
+        exec_body["args"] = {"-c", cmd};
+        exec_body["user"] = "root";
+        auto exec_msg =
+            request(docker::POST, fmt::format("{}/exec", this->endpoint), false, json::serialize(exec_body));
+        if (exec_msg && (exec_msg->first == 200)) {
+          logs::log(logs::info, "[HOOK] call exec hook: {} - {}", exec_msg->first, exec_msg->second);
+        } else {
+          logs::log(logs::error, "[HOOK] call exec hook error: {} - {}", exec_msg->first, exec_msg->second);
+        }
       }
     }
     std::this_thread::sleep_for(500ms);
