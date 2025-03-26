@@ -139,8 +139,60 @@ void RunHook::run(std::size_t session_id,
       });
 
   auto unplug_device_handler = this->ev_bus->register_handler<immer::box<events::UnplugDeviceEvent>>(
-      [session_id, this](const immer::box<events::UnplugDeviceEvent> &ev) {
+      [session_id, hw_db_path, this](const immer::box<events::UnplugDeviceEvent> &ev) {
+        if (ev->session_id != session_id) {
+          return;
+        }
         logs::log(logs::info, "[HOOK] unplugin event session {}", session_id);
+        for (const auto &[filename, content] : ev->udev_hw_db_entries) {
+          auto hwdb_file = hw_db_path / filename;
+          auto exec_body = json::object();
+          exec_body["cmd"] = "/bin/bash";
+          exec_body["args"] = {"-c", fmt::format("rm -f {}", hwdb_file.string())};
+          exec_body["user"] = "root";
+          auto exec_msg =
+              request(docker::POST, fmt::format("{}/exec", this->endpoint), false, json::serialize(exec_body));
+          if (exec_msg && (exec_msg->first == 200)) {
+            logs::log(logs::info,
+                      "[HOOK] remove hwdb file {} success: {} - {}",
+                      hwdb_file.string(),
+                      exec_msg->first,
+                      exec_msg->second);
+          } else {
+            logs::log(logs::error,
+                      "[HOOK] remove hwdb file {} error: {} - {}",
+                      hwdb_file.string(),
+                      exec_msg->first,
+                      exec_msg->second);
+          }
+        }
+        for (auto udev_ev : ev->udev_events) {
+          udev_ev["ACTION"] = "remove";
+          std::string udev_msg = utils::base64_encode(utils::map_to_string(udev_ev));
+          std::string cmd;
+          if (udev_ev.count("DEVNAME") == 0) {
+            cmd = fmt::format("fake-udev -m {}", udev_msg);
+          } else {
+            cmd = fmt::format("fake-udev -m {} && rm {}", udev_msg, udev_ev["DEVNAME"]);
+          }
+          auto exec_body = json::object();
+          exec_body["cmd"] = "/bin/bash";
+          exec_body["args"] = {"-c", cmd};
+          exec_body["user"] = "root";
+          auto exec_msg =
+              request(docker::POST, fmt::format("{}/exec", this->endpoint), false, json::serialize(exec_body));
+          if (exec_msg && (exec_msg->first == 200)) {
+            logs::log(logs::info,
+                      "[HOOK] call exec hook to remove udev event: {} - {}",
+                      exec_msg->first,
+                      exec_msg->second);
+          } else {
+            logs::log(logs::error,
+                      "[HOOK] call exec hook to remove udev event error: {} - {}",
+                      exec_msg->first,
+                      exec_msg->second);
+          }
+        }
       });
 
   do {
