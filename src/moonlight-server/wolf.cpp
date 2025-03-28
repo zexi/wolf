@@ -115,42 +115,53 @@ std::optional<AudioServer> setup_audio_server(const std::string &runtime_dir) {
   if (audio::connected(audio_server)) {
     return {{.server = audio_server}};
   } else {
-    logs::log(logs::info, "Starting PulseAudio docker container");
-    docker::DockerAPI docker_api(utils::get_env("WOLF_DOCKER_SOCKET", "/var/run/docker.sock"));
+    // logs::log(logs::info, "Starting PulseAudio docker container");
+    // docker::DockerAPI docker_api(utils::get_env("WOLF_DOCKER_SOCKET", "/var/run/docker.sock"));
 
-    std::string container_name = "WolfPulseAudio";
+    // std::string container_name = "WolfPulseAudio";
 
-    auto container = docker_api.get_by_name(container_name);
-    if (container->id == "") {
-      auto pulse_socket = fmt::format("{}/pulse-socket", runtime_dir);
-      /* Cleanup old leftovers, Pulse will fail to start otherwise */
-      std::filesystem::remove(pulse_socket);
-      std::filesystem::remove_all(fmt::format("{}/pulse", runtime_dir));
+    // auto container = docker_api.get_by_name(container_name);
+    // if (container->id == "") {
+    //   auto pulse_socket = fmt::format("{}/pulse-socket", runtime_dir);
+    //   /* Cleanup old leftovers, Pulse will fail to start otherwise */
+    //   std::filesystem::remove(pulse_socket);
+    //   std::filesystem::remove_all(fmt::format("{}/pulse", runtime_dir));
 
-      container = docker_api.create(
-          docker::Container{
-              .id = "",
-              .name = container_name,
-              .image = utils::get_env("WOLF_PULSE_IMAGE", "ghcr.io/games-on-whales/pulseaudio:master"),
-              .status = docker::CREATED,
-              .ports = {},
-              .mounts = {docker::MountPoint{.source = runtime_dir, .destination = "/tmp/pulse/", .mode = "rw"}},
-              .env = {"XDG_RUNTIME_DIR=/tmp/pulse/", "UNAME=retro", "UID=1000", "GID=1000"}},
-          // The following is needed when using podman (or any container that uses SELINUX). This way we can access the
-          // socket that is created by PulseAudio from other containers (including this one).
-          R"({
-                  "HostConfig" : {
-                    "SecurityOpt" : ["label=disable"]
-                  }
-            })");
-    } else {
-      logs::log(logs::info, "===reuse {} container===", container_name);
+    //   logs::log(logs::info, "=== Creating PulseAudio container");
+    //   container = docker_api.create(
+    //       docker::Container{
+    //           .id = "",
+    //           .name = container_name,
+    //           .image = utils::get_env("WOLF_PULSE_IMAGE", "ghcr.io/games-on-whales/pulseaudio:master"),
+    //           .status = docker::CREATED,
+    //           .ports = {},
+    //           .mounts = {docker::MountPoint{.source = runtime_dir, .destination = "/tmp/pulse/", .mode = "rw"}},
+    //           .env = {"XDG_RUNTIME_DIR=/tmp/pulse/", "UNAME=retro", "UID=1000", "GID=1000"}},
+    //       // The following is needed when using podman (or any container that uses SELINUX). This way we can access
+    //       the
+    //       // socket that is created by PulseAudio from other containers (including this one).
+    //       R"({
+    //               "HostConfig" : {
+    //                 "SecurityOpt" : ["label=disable"]
+    //               }
+    //         })");
+    // } else {
+    //   logs::log(logs::info, "===reuse {} container===", container_name);
+    // }
+    // if (container && docker_api.start_by_id(container.value().id)) {
+    //   auto ms = std::stoi(utils::get_env("WOLF_PULSE_CONTAINER_TIMEOUT_MS", "2000"));
+    //   std::this_thread::sleep_for(std::chrono::milliseconds(ms)); // TODO: Better way of knowing when ready?
+    //   return {{.server = audio::connect(fmt::format("{}/pulse-socket", runtime_dir)), .container = container}};
+    // }
+    // 在这里判断是否存在pulse-socket
+    while (!std::filesystem::exists(fmt::format("{}/pulse-socket", runtime_dir))) {
+      logs::log(logs::info, "waiting for {}", fmt::format("{}/pulse-socket", runtime_dir));
+      std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     }
-    if (container && docker_api.start_by_id(container.value().id)) {
-      auto ms = std::stoi(utils::get_env("WOLF_PULSE_CONTAINER_TIMEOUT_MS", "2000"));
-      std::this_thread::sleep_for(std::chrono::milliseconds(ms)); // TODO: Better way of knowing when ready?
-      return {{.server = audio::connect(fmt::format("{}/pulse-socket", runtime_dir)), .container = container}};
-    }
+    auto ms = std::stoi(utils::get_env("WOLF_PULSE_CONTAINER_TIMEOUT_MS", "2000"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms)); // TODO: Better way of knowing when ready?
+    logs::log(logs::info, "connecting to pulse {}", fmt::format("{}/pulse-socket", runtime_dir));
+    return {{.server = audio::connect(fmt::format("{}/pulse-socket", runtime_dir))}};
   }
 
   logs::log(logs::warning, "Failed to connect to any PulseAudio server, audio will not be available!");
