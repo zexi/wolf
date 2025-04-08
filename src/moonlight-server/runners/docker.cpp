@@ -71,6 +71,10 @@ void RunDocker::run(std::size_t session_id,
   if (get_vendor(render_node) == NVIDIA && !utils::get_env("NVIDIA_DRIVER_VOLUME_NAME")) {
     logs::log(logs::info, "NVIDIA_DRIVER_VOLUME_NAME not set, assuming nvidia driver toolkit is installed..");
     {
+      if (auto driver_volume = utils::get_env("FORCE_NVIDIA_DRIVER_VOLUME_NAME")) {
+        logs::log(logs::info, "Forcely mounting nvidia driver {}:/usr/nvidia", driver_volume);
+        mounts.push_back({driver_volume, "/usr/nvidia"});
+      }
       auto parsed_json = utils::parse_json(final_json_opts).as_object();
       auto default_gpu_config = boost::json::array{                    // [
                                                    boost::json::object{// {
