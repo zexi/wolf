@@ -13,6 +13,26 @@ void create_udev_hw_files(std::filesystem::path base_hw_db_path,
   }
 }
 
+/**
+ * @brief returns the major number associated with the requested device type (if found)
+ * Internally will read /proc/devices line by line and return the first match
+ */
+static std::optional<std::string> get_device_major(std::string_view type) {
+  std::ifstream devices_file("/proc/devices");
+  std::string line;
+  while (std::getline(devices_file, line)) {
+    if (line.find(type) != std::string::npos) {
+      // Example line: "244 hidraw" or " 13 input" (note the leading space)
+      line.erase(line.begin(),
+                 std::find_if(line.begin(), line.end(), [](unsigned char ch) {
+                   return ch >= '0' && ch <= '9';
+ }));
+      return line.substr(0, line.find(' '));
+    }
+  }
+  return std::nullopt;
+}
+
 void RunDocker::run(std::size_t session_id,
                     std::string_view app_state_folder,
                     std::shared_ptr<events::devices_atom_queue> plugged_devices_queue,
@@ -114,6 +134,43 @@ void RunDocker::run(std::size_t session_id,
       }
     }
   }
+
+  // when creating a virtual DualSense device we need to also mount a `/dev/hidraw*` device.
+  // unfortunately hidraw devices use dynamically assigned major numbers rather than static ones
+  // so we'll get the major number from reading `/proc/devices` for `hidraw` and `input`
+  // and set the right entries in `DeviceCgroupRules`
+  {
+    auto hidraw_major = get_device_major("hidraw");
+    auto input_major = get_device_major("input");
+    if (hidraw_major && input_major) {
+      logs::log(logs::debug,
+                "[DOCKER] Setting DeviceCgroupRules for hidraw:{} and input:{}",
+                *hidraw_major,
+                *input_major);
+      auto parsed_json = utils::parse_json(final_json_opts).as_object();
+      if (auto host_config_ptr = parsed_json.if_contains("HostConfig")) {
+        auto host_config = host_config_ptr->as_object();
+        host_config["DeviceCgroupRules"] = json::array{
+            fmt::format("c {}:* rwm", *hidraw_major),
+            fmt::format("c {}:* rwm", *input_major),
+        };
+        parsed_json["HostConfig"] = host_config;
+      } else {
+        parsed_json["HostConfig"] = json::object{
+            {"DeviceCgroupRules",
+             json::array{
+                 fmt::format("c {}:* rwm", *hidraw_major),
+                 fmt::format("c {}:* rwm", *input_major),
+             }},
+        };
+      }
+      final_json_opts = boost::json::serialize(parsed_json);
+    } else {
+      logs::log(logs::warning, "[DOCKER] Failed to get major numbers for hidraw and input");
+    }
+  }
+
+  logs::log(logs::debug, "[DOCKER] Container options: {}", final_json_opts);
 
   Container new_container = {.id = "",
                              .name = fmt::format("{}_{}", this->container.name, session_id),
