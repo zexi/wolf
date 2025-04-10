@@ -30,7 +30,7 @@ void startServer(HttpServer *server, const immer::box<state::AppState> state, in
   server->default_resource["POST"] = endpoints::not_found<SimpleWeb::HTTP>;
 
   server->resource["^/serverinfo$"]["GET"] = [&state](auto resp, auto req) {
-    endpoints::serverinfo<SimpleWeb::HTTP>(resp, req, state);
+    endpoints::serverinfo<SimpleWeb::HTTP>(resp, req, {}, state);
   };
 
   server->resource["^/pair$"]["GET"] = [&state](auto resp, auto req) { endpoints::pair(resp, req, state); };
@@ -76,7 +76,7 @@ void startServer(HttpServer *server, const immer::box<state::AppState> state, in
       [pairing_atom](const immer::box<events::PairSignal> pair_sig) {
         pairing_atom->update([&pair_sig](const immer::map<std::string, immer::box<events::PairSignal>> &m) {
           auto secret = crypto::str_to_hex(crypto::random(8));
-          auto http_port = std::to_string(state::HTTP_PORT());
+          auto http_port = std::to_string(state::get_port(state::HTTP_PORT));
           logs::log(logs::info, "Insert pin at http://{}:{}/pin/#{}", pair_sig->host_ip, http_port, secret);
           // filter out any other (dangling) pair request from the same client
           auto t_map = m.transient();
@@ -124,8 +124,9 @@ void startServer(HttpsServer *server, const immer::box<state::AppState> state, i
   server->default_resource["POST"] = endpoints::not_found<SimpleWeb::HTTPS>;
 
   server->resource["^/serverinfo$"]["GET"] = [&state](auto resp, auto req) {
-    if (get_client_if_paired(state, req)) {
-      endpoints::serverinfo<SimpleWeb::HTTPS>(resp, req, state);
+    if (auto client = get_client_if_paired(state, req)) {
+      auto client_session = state::get_session_by_client(state->running_sessions->load(), client.value());
+      endpoints::serverinfo<SimpleWeb::HTTPS>(resp, req, client_session, state);
     } else {
       reply_unauthorized(req, resp);
     }

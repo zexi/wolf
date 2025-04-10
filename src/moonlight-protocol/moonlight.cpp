@@ -185,13 +185,22 @@ XML applist(const immer::vector<App> &apps) {
 }
 
 XML launch_success(const std::string &local_ip, const std::string &rtsp_port) {
-  // TODO: implement resume
   // TODO: implement error on launch
   XML resp;
 
   resp.put("root.<xmlattr>.status_code", 200);
   resp.put("root.sessionUrl0", "rtsp://" + local_ip + ":" + rtsp_port);
   resp.put("root.gamesession", 1);
+
+  return resp;
+}
+
+XML launch_resume(const std::string &local_ip, const std::string &rtsp_port) {
+  XML resp;
+
+  resp.put("root.<xmlattr>.status_code", 200);
+  resp.put("root.sessionUrl0", "rtsp://" + local_ip + ":" + rtsp_port);
+  resp.put("root.resume", 1);
 
   return resp;
 }

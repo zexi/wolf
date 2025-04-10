@@ -5,7 +5,7 @@
 
 namespace state {
 
-int https_port = 47984;
+/*int https_port = 47984;
 int http_port = 47989;
 int control_port = 47999;    // udp
 int video_ping_port = 48100; // udp
@@ -53,6 +53,6 @@ int AUDIO_PING_PORT() {
 
 int RTSP_SETUP_PORT() {
   return rtsp_setup_port;
-}
+}*/
 
 } // namespace state

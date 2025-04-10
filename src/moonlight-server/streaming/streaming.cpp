@@ -1,5 +1,6 @@
 #include <control/control.hpp>
-#include <functional>
+#include <gstreamer-1.0/gst/app/gstappsink.h>
+#include <gstreamer-1.0/gst/app/gstappsrc.h>
 #include <immer/array.hpp>
 #include <immer/array_transient.hpp>
 #include <immer/box.hpp>
@@ -152,12 +153,85 @@ void start_audio_producer(std::size_t session_id,
   });
 }
 
+namespace custom_sink {
+
+struct UDPSink {
+  std::shared_ptr<udp::socket> socket;
+  std::shared_ptr<udp::endpoint> client_endpoint;
+};
+
+static GstFlowReturn
+send_buffer(std::shared_ptr<GstBuffer> buffer, std::shared_ptr<GstSample> sample, UDPSink *udp_sink) {
+  GstMapInfo map;
+  if (gst_buffer_map(buffer.get(), &map, GST_MAP_READ)) {
+    std::shared_ptr<GstMapInfo> map_ptr = std::make_shared<GstMapInfo>(map);
+    if (!udp_sink->socket->is_open()) {
+      logs::log(logs::debug, "UDP Socket is not open");
+      udp_sink->socket->open(udp::v4());
+    }
+    udp_sink->socket->async_send_to(
+        boost::asio::buffer(map.data, map.size),
+        *udp_sink->client_endpoint,
+        [buffer, sample, map_ptr](const boost::system::error_code &error, std::size_t bytes_sent) {
+          if (error) {
+            logs::log(logs::error, "Error sending UDP packet: {}", error.message());
+          }
+          gst_buffer_unmap(buffer.get(), map_ptr.get());
+        });
+    return GST_FLOW_OK;
+  } else {
+    logs::log(logs::error, "Failed to map buffer");
+    return GST_FLOW_ERROR;
+  }
+}
+
+static GstFlowReturn on_new_sample(GstAppSink *appsink, gpointer user_data) {
+  std::shared_ptr<GstSample> sample(gst_app_sink_pull_sample(appsink), gst_sample_unref);
+  if (!sample) {
+    return GST_FLOW_ERROR;
+  }
+
+  UDPSink *udp_sink = static_cast<UDPSink *>(user_data);
+
+  GstBufferList *buffer_list = gst_sample_get_buffer_list(sample.get());
+  if (buffer_list) {
+    // TODO: use boost to properly send multiple buffers in one go
+    for (guint i = 0; i < gst_buffer_list_length(buffer_list); ++i) {
+      GstBuffer *buffer = gst_buffer_list_get(buffer_list, i);
+      std::shared_ptr<GstBuffer> buffer_ptr(gst_buffer_ref(buffer), gst_buffer_unref);
+      return send_buffer(buffer_ptr, sample, udp_sink);
+    }
+  } else {
+    GstBuffer *buffer = gst_sample_get_buffer(sample.get());
+    if (buffer) {
+      std::shared_ptr<GstBuffer> buffer_ptr(gst_buffer_ref(buffer), gst_buffer_unref);
+      return send_buffer(buffer_ptr, sample, udp_sink);
+    }
+  }
+  return GST_FLOW_ERROR;
+}
+
+// Configure the appsink element
+static void configure_appsink(GstElement *appsink, UDPSink *udp_sink) {
+  // Set to emit signals
+  g_object_set(appsink, "emit-signals", TRUE, NULL);
+  g_object_set(appsink, "buffer-list", FALSE, NULL); // TODO: implement this
+
+  // Connect the new-sample signal
+  GstAppSinkCallbacks callbacks = {nullptr};
+  callbacks.new_sample = on_new_sample;
+  gst_app_sink_set_callbacks(GST_APP_SINK(appsink), &callbacks, udp_sink, nullptr);
+}
+} // namespace custom_sink
+
 /**
  * Start VIDEO pipeline
  */
-void start_streaming_video(const immer::box<events::VideoSession> &video_session,
+void start_streaming_video(immer::box<events::VideoSession> video_session,
                            const std::shared_ptr<events::EventBusType> &event_bus,
-                           unsigned short client_port) {
+                           std::string client_ip,
+                           unsigned short client_port,
+                           std::shared_ptr<udp::socket> video_socket) {
   std::string color_range = (video_session->color_range == events::ColorRange::JPEG) ? "jpeg" : "mpeg2";
   std::string color_space;
   switch (video_session->color_space) {
@@ -179,7 +253,7 @@ void start_streaming_video(const immer::box<events::VideoSession> &video_session
                               fmt::arg("fps", video_session->display_mode.refreshRate),
                               fmt::arg("bitrate", video_session->bitrate_kbps),
                               fmt::arg("client_port", client_port),
-                              fmt::arg("client_ip", video_session->client_ip),
+                              fmt::arg("client_ip", client_ip),
                               fmt::arg("payload_size", video_session->packet_size),
                               fmt::arg("fec_percentage", video_session->fec_percentage),
                               fmt::arg("min_required_fec_packets", video_session->min_required_fec_packets),
@@ -189,7 +263,18 @@ void start_streaming_video(const immer::box<events::VideoSession> &video_session
                               fmt::arg("host_port", video_session->port));
   logs::log(logs::debug, "Starting video pipeline: \n{}", pipeline);
 
-  run_pipeline(pipeline, [video_session, event_bus](auto pipeline, auto loop) {
+  std::shared_ptr<custom_sink::UDPSink> udp_sink = std::make_shared<custom_sink::UDPSink>(custom_sink::UDPSink{
+      .socket = video_socket,
+      .client_endpoint = std::make_shared<udp::endpoint>(boost::asio::ip::make_address(client_ip), client_port)});
+
+  run_pipeline(pipeline, [video_session, event_bus, udp_sink](auto pipeline, auto loop) {
+    if (auto app_sink_el = gst_bin_get_by_name(GST_BIN(pipeline.get()), "wolf_udp_sink")) {
+      logs::log(logs::debug, "Setting up wolf_udp_sink");
+      g_assert(GST_IS_APP_SINK(app_sink_el));
+      configure_appsink(app_sink_el, udp_sink.get());
+      gst_object_unref(app_sink_el);
+    }
+
     /*
      * The force IDR event will be triggered by the control stream.
      * We have to pass this back into the gstreamer pipeline
@@ -245,9 +330,11 @@ void start_streaming_video(const immer::box<events::VideoSession> &video_session
 /**
  * Start AUDIO pipeline
  */
-void start_streaming_audio(const immer::box<events::AudioSession> &audio_session,
+void start_streaming_audio(immer::box<events::AudioSession> audio_session,
                            const std::shared_ptr<events::EventBusType> &event_bus,
+                           std::string client_ip,
                            unsigned short client_port,
+                           std::shared_ptr<udp::socket> audio_socket,
                            const std::string &sink_name,
                            const std::string &server_name) {
   auto pipeline = fmt::format(
@@ -266,11 +353,22 @@ void start_streaming_audio(const immer::box<events::AudioSession> &audio_session
       fmt::arg("aes_iv", audio_session->aes_iv),
       fmt::arg("encrypt", audio_session->encrypt_audio),
       fmt::arg("client_port", client_port),
-      fmt::arg("client_ip", audio_session->client_ip),
+      fmt::arg("client_ip", client_ip),
       fmt::arg("host_port", audio_session->port));
   logs::log(logs::debug, "Starting audio pipeline: \n{}", pipeline);
 
-  run_pipeline(pipeline, [session_id = audio_session->session_id, event_bus](auto pipeline, auto loop) {
+  std::shared_ptr<custom_sink::UDPSink> udp_sink = std::make_shared<custom_sink::UDPSink>(custom_sink::UDPSink{
+      .socket = audio_socket,
+      .client_endpoint = std::make_shared<udp::endpoint>(boost::asio::ip::make_address(client_ip), client_port)});
+
+  run_pipeline(pipeline, [session_id = audio_session->session_id, udp_sink, event_bus](auto pipeline, auto loop) {
+    if (auto app_sink_el = gst_bin_get_by_name(GST_BIN(pipeline.get()), "wolf_udp_sink")) {
+      logs::log(logs::debug, "Setting up wolf_udp_sink");
+      g_assert(GST_IS_APP_SINK(app_sink_el));
+      custom_sink::configure_appsink(app_sink_el, udp_sink.get());
+      gst_object_unref(app_sink_el);
+    }
+
     auto pause_handler = event_bus->register_handler<immer::box<events::PauseStreamEvent>>(
         [session_id, loop](const immer::box<events::PauseStreamEvent> &ev) {
           if (ev->session_id == session_id) {

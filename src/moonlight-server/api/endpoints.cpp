@@ -1,5 +1,6 @@
 #include <api/api.hpp>
 #include <control/input_handler.hpp>
+#include <rtp/udp-ping.hpp>
 #include <state/config.hpp>
 #include <state/sessions.hpp>
 
@@ -89,7 +90,7 @@ void UnixSocketServer::endpoint_Apps(const HTTPRequest &req, std::shared_ptr<Uni
 }
 
 void UnixSocketServer::endpoint_AddApp(const HTTPRequest &req, std::shared_ptr<UnixSocket> socket) {
-  auto app = rfl::json::read<rfl::Reflector<wolf::core::events::App>::ReflType>(req.body);
+  auto app = rfl::json::read<rfl::Reflector<events::App>::ReflType>(req.body);
   if (app) {
     state_->app_state->config->apps->update([app = app.value(), this](auto &apps) {
       auto runner =
@@ -142,7 +143,7 @@ void UnixSocketServer::endpoint_StreamSessions(const HTTPRequest &req, std::shar
 }
 
 void UnixSocketServer::endpoint_StreamSessionAdd(const HTTPRequest &req, std::shared_ptr<UnixSocket> socket) {
-  auto session = rfl::json::read<rfl::Reflector<wolf::core::events::StreamSession>::ReflType>(req.body);
+  auto session = rfl::json::read<rfl::Reflector<events::StreamSession>::ReflType>(req.body);
   if (session) {
     auto ss = session.value();
     auto app = state::get_app_by_id(this->state_->app_state->config, ss.app_id);
@@ -170,8 +171,11 @@ void UnixSocketServer::endpoint_StreamSessionAdd(const HTTPRequest &req, std::sh
                                .refreshRate = ss.video_refresh_rate,
                                .hevc_supported = state_->app_state->config->support_hevc,
                                .av1_supported = state_->app_state->config->support_av1},
-        ss.audio_channel_count);
-    new_session->ip = ss.client_ip; // Needed in order to match `/serverinfo`
+        ss.audio_channel_count,
+        ss.aes_key,
+        ss.aes_iv);
+    new_session->ip = ss.client_ip;
+    new_session->rtsp_fake_ip = ss.rtsp_fake_ip;
 
     state_->app_state->running_sessions->update(
         [new_session](const immer::vector<events::StreamSession> &ses_v) { return ses_v.push_back(*new_session); });

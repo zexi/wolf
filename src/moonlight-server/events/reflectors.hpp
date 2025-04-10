@@ -81,6 +81,11 @@ template <> struct Reflector<events::StreamSession> {
     std::string client_id;
     std::string client_ip;
 
+    // gcm encryption keys
+    std::string aes_key;
+    std::string aes_iv;
+    std::string rtsp_fake_ip;
+
     int video_width;
     int video_height;
     int video_refresh_rate;
@@ -94,6 +99,9 @@ template <> struct Reflector<events::StreamSession> {
     return {.app_id = v.app->base.id,
             .client_id = std::to_string(v.session_id),
             .client_ip = v.ip,
+            .aes_key = v.aes_key,
+            .aes_iv = v.aes_iv,
+            .rtsp_fake_ip = v.rtsp_fake_ip,
             .video_width = v.display_mode.width,
             .video_height = v.display_mode.height,
             .video_refresh_rate = v.display_mode.refreshRate,

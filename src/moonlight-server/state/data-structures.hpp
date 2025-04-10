@@ -33,21 +33,32 @@ namespace ba = boost::asio;
 /**
  * All ports are derived from a base port, default: 47989
  */
-/*enum STANDARD_PORTS_MAPPING {
+enum STANDARD_PORTS_MAPPING {
   HTTPS_PORT = 20001,
   HTTP_PORT = 20006,
   CONTROL_PORT = 20016,
   VIDEO_PING_PORT = 20117,
   AUDIO_PING_PORT = 20217,
   RTSP_SETUP_PORT = 20027
-};*/
-void init_ports();
-int HTTPS_PORT();
-int HTTP_PORT();
-int CONTROL_PORT();
-int VIDEO_PING_PORT();
-int AUDIO_PING_PORT();
-int RTSP_SETUP_PORT();
+};
+
+inline int get_port(STANDARD_PORTS_MAPPING port) {
+  switch (port) {
+  case HTTPS_PORT:
+    return utils::get_env("WOLF_HTTP_PORT") ? std::stoi(utils::get_env("WOLF_HTTP_PORT")) : HTTPS_PORT;
+  case HTTP_PORT:
+    return utils::get_env("WOLF_HTTP_PORT") ? std::stoi(utils::get_env("WOLF_HTTP_PORT")) : HTTP_PORT;
+  case CONTROL_PORT:
+    return utils::get_env("WOLF_CONTROL_PORT") ? std::stoi(utils::get_env("WOLF_CONTROL_PORT")) : CONTROL_PORT;
+  case VIDEO_PING_PORT:
+    return utils::get_env("WOLF_VIDEO_PING_PORT") ? std::stoi(utils::get_env("WOLF_VIDEO_PING_PORT")) : VIDEO_PING_PORT;
+  case AUDIO_PING_PORT:
+    return utils::get_env("WOLF_AUDIO_PING_PORT") ? std::stoi(utils::get_env("WOLF_AUDIO_PING_PORT")) : AUDIO_PING_PORT;
+  case RTSP_SETUP_PORT:
+    return utils::get_env("WOLF_RTSP_SETUP_PORT") ? std::stoi(utils::get_env("WOLF_RTSP_SETUP_PORT")) : RTSP_SETUP_PORT;
+  }
+  return 0;
+}
 
 using PairedClientList = immer::vector<immer::box<wolf::config::PairedClient>>;
 

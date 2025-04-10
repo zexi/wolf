@@ -540,11 +540,21 @@ EXPOSE 47989/tcp
 EXPOSE 47999/udp
 # RTSP
 EXPOSE 48010/tcp
-# Video (up to 10 users, you can open more ports if needed)
-EXPOSE 48100-48110/udp
-# Audio (up to 10 users, you can open more ports if needed)
-EXPOSE 48200-48210/udp
+# Video
+EXPOSE 48100/udp
+# Audio
+EXPOSE 48200/udp
 ....
+
+These are the default values, if you want to assign custom ports you can set the env variables:
+
+* `WOLF_HTTP_PORT`
+* `WOLF_HTTPS_PORT`
+* `WOLF_CONTROL_PORT`
+* `WOLF_RTSP_SETUP_PORT`
+* `WOLF_VIDEO_PING_PORT`
+* `WOLF_AUDIO_PING_PORT`
+
 ====
 
 == Moonlight pairing

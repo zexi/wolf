@@ -9,7 +9,7 @@ on:
       - "docker/**"
       - ".github/**"
   pull_request:
-    paths:
+    paths-ignore:
       - "docs/**"
       - "docker/**"
       - ".github/**"
@@ -20,6 +20,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
 
       - uses: DoozyX/clang-format-lint-action@v0.14
         with:

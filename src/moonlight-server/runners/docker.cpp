@@ -24,9 +24,7 @@ static std::optional<std::string> get_device_major(std::string_view type) {
     if (line.find(type) != std::string::npos) {
       // Example line: "244 hidraw" or " 13 input" (note the leading space)
       line.erase(line.begin(),
-                 std::find_if(line.begin(), line.end(), [](unsigned char ch) {
-                   return ch >= '0' && ch <= '9';
- }));
+                 std::find_if(line.begin(), line.end(), [](unsigned char ch) { return ch >= '0' && ch <= '9'; }));
       return line.substr(0, line.find(' '));
     }
   }

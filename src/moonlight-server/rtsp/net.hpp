@@ -54,6 +54,25 @@ public:
     socket_.close();
   }
 
+  static std::optional<events::StreamSession> get_session(const immer::vector<events::StreamSession> &sessions,
+                                                          const RTSP_PACKET &packet,
+                                                          std::string_view user_ip) {
+    std::string host_option = "";
+    if (auto host = packet.options.find("Host"); host != packet.options.end()) {
+      host_option = host->second;
+    }
+    for (const events::StreamSession &session : sessions) {
+      if (session.rtsp_fake_ip == packet.request.uri.ip || host_option == session.rtsp_fake_ip) {
+        logs::log(logs::debug, "[RTSP] found session by matching payload: {}", session.rtsp_fake_ip);
+        return session;
+      } else if ((host_option == "0.0.0.0" || host_option.empty()) && session.ip == user_ip) {
+        logs::log(logs::debug, "[RTSP] found session by matching IP: {}", session.ip);
+        return session;
+      }
+    }
+    return std::nullopt;
+  }
+
   /**
    * Will start the following (async) chain:
    *  1- wait for a message
@@ -66,7 +85,7 @@ public:
     receive_message([self = shared_from_this()](auto parsed_msg) {
       if (parsed_msg) {
         auto user_ip = self->socket().remote_endpoint().address().to_string();
-        auto session = state::get_session_by_ip(self->stream_sessions->load(), user_ip);
+        auto session = get_session(self->stream_sessions->load(), parsed_msg.value(), user_ip);
         if (session) {
           auto response = commands::message_handler(parsed_msg.value(), session.value());
           self->send_message(response, [self](auto bytes) { self->close(); });

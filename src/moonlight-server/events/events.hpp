@@ -118,7 +118,10 @@ struct VideoSession {
   ColorSpace color_space;
 
   std::string client_ip;
+  std::array<char, 16> rtp_secret_payload;
 };
+
+using video_session_list = immer::vector<immer::box<VideoSession>>;
 
 struct AudioSession {
   std::string gst_pipeline;
@@ -133,10 +136,13 @@ struct AudioSession {
   std::uint16_t port;
   bool wait_for_ping = true;
   std::string client_ip;
+  std::array<char, 16> rtp_secret_payload;
 
   int packet_duration;
   wolf::core::audio::AudioMode audio_mode;
 };
+
+using audio_session_list = immer::vector<immer::box<AudioSession>>;
 
 struct IDRRequestEvent {
   // A unique ID that identifies this session
@@ -158,11 +164,15 @@ struct StopStreamEvent {
 struct RTPVideoPingEvent {
   std::string client_ip;
   unsigned short client_port;
+  rfl::Skip<std::shared_ptr<boost::asio::ip::udp::socket>> video_socket;
+  std::optional<std::array<char, 16>> payload;
 };
 
 struct RTPAudioPingEvent {
   std::string client_ip;
   unsigned short client_port;
+  rfl::Skip<std::shared_ptr<boost::asio::ip::udp::socket>> audio_socket;
+  std::optional<std::array<char, 16>> payload;
 };
 
 struct StreamSession;
@@ -232,12 +242,24 @@ struct StreamSession {
   std::string aes_key;
   std::string aes_iv;
 
+  // Moonlight protocol extension to support IP-less connections
+  std::array<char, 16> rtp_secret_payload;
+  uint32_t enet_secret_payload;
+  /**
+   * A dirty hack in order to support RTSP without IP.
+   *
+   * Moonlight will parrot back the IP that we send out in the launch or resume HTTPs requests.
+   * So we send out a fake unique IP for each session in order to identify the session back in the RTSP thread.
+   */
+  std::string rtsp_fake_ip;
+
   // client info
   std::size_t session_id;
   std::string ip;
 
   unsigned short video_stream_port;
   unsigned short audio_stream_port;
+  unsigned short control_stream_port;
 
   /**
    * Optional: the wayland display for the current session.
