@@ -34,18 +34,18 @@ namespace ba = boost::asio;
  * All ports are derived from a base port, default: 47989
  */
 enum STANDARD_PORTS_MAPPING {
-  HTTPS_PORT = 20001,
-  HTTP_PORT = 20006,
-  CONTROL_PORT = 20016,
-  VIDEO_PING_PORT = 20117,
-  AUDIO_PING_PORT = 20217,
-  RTSP_SETUP_PORT = 20027
+  HTTPS_PORT = 47984,
+  HTTP_PORT = 47989,
+  CONTROL_PORT = 47999,
+  VIDEO_PING_PORT = 48100,
+  AUDIO_PING_PORT = 48200,
+  RTSP_SETUP_PORT = 48010
 };
 
 inline int get_port(STANDARD_PORTS_MAPPING port) {
   switch (port) {
   case HTTPS_PORT:
-    return utils::get_env("WOLF_HTTP_PORT") ? std::stoi(utils::get_env("WOLF_HTTP_PORT")) : HTTPS_PORT;
+    return utils::get_env("WOLF_HTTPS_PORT") ? std::stoi(utils::get_env("WOLF_HTTPS_PORT")) : HTTPS_PORT;
   case HTTP_PORT:
     return utils::get_env("WOLF_HTTP_PORT") ? std::stoi(utils::get_env("WOLF_HTTP_PORT")) : HTTP_PORT;
   case CONTROL_PORT:
