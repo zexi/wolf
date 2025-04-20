@@ -170,12 +170,34 @@ std::optional<AudioServer> setup_audio_server(const std::string &runtime_dir) {
 
 using session_devices = immer::map<std::size_t /* session_id */, std::shared_ptr<events::devices_atom_queue>>;
 
-template <typename SessionType>
-immer::vector<immer::box<SessionType>> remove_session(const immer::vector<immer::box<SessionType>> &sessions,
-                                                      const std::size_t session_id) {
-  return sessions                                                                                               //
-         | ranges::views::filter([=](const immer::box<SessionType> &s) { return s->session_id != session_id; }) //
-         | ranges::to<immer::vector<immer::box<SessionType>>>();
+/**
+ * Will stop the execution until an event of type RTPPingType is triggered
+ * and the signature is matching the input `sess`.
+ * Returns the RTPPingType event
+ */
+template <typename RTPPingType>
+immer::box<RTPPingType> wait_for_ping(std::shared_ptr<events::EventBusType> ev_bus, const auto &sess) {
+  auto ping_promise = std::make_shared<std::promise<RTPPingType>>();
+  auto ping_future = ping_promise->get_future();
+
+  auto handler =
+      ev_bus->register_handler<immer::box<RTPPingType>>([sess, ping_promise](const immer::box<RTPPingType> &ping_ev) {
+        // Check if this ping is for our session
+        if (sess->rtp_secret_payload == ping_ev->payload || // Secret payload matching
+            (!ping_ev->payload.has_value() && ping_ev->client_ip == sess->client_ip &&
+             ping_ev->client_port == sess->port)) { // Legacy IP+port matching when no payload has been passed
+          // Resolve the promise with the ping event data
+          ping_promise->set_value(*ping_ev);
+        }
+      });
+
+  // Wait for the promise to be fulfilled
+  auto ping_ev = ping_future.get();
+
+  // Unregister the handler since we only need it once
+  handler.unregister();
+
+  return ping_ev;
 }
 
 auto setup_sessions_handlers(const immer::box<state::AppState> &app_state,
@@ -397,77 +419,41 @@ auto setup_sessions_handlers(const immer::box<state::AppState> &app_state,
         }).detach();
       }));
 
-  /**
-   * A list of video sessions created during RTSP and waiting for a RTP ping
-   */
-  std::shared_ptr<immer::atom<events::video_session_list>> video_waiting_list =
-      std::make_shared<immer::atom<events::video_session_list>>(events::video_session_list{});
-
-  // When a VideoSession is created, add it to the waiting list
   handlers.push_back(app_state->event_bus->register_handler<immer::box<events::VideoSession>>(
-      [video_waiting_list](const immer::box<events::VideoSession> &sess) {
-        video_waiting_list->update([=](auto &sessions) { return sessions.push_back(sess.get()); });
+      [ev_bus = app_state->event_bus](const immer::box<events::VideoSession> &sess) {
+        // Start a thread that will wait for the RTP ping event
+        std::thread([sess, ev_bus]() {
+          auto ping_ev = wait_for_ping<events::RTPVideoPingEvent>(ev_bus, sess);
+
+          // Start streaming
+          streaming::start_streaming_video(sess,
+                                           ev_bus,
+                                           ping_ev->client_ip,
+                                           ping_ev->client_port,
+                                           ping_ev->video_socket.get());
+        }).detach();
       }));
 
-  // When we receive a RTP ping, look for the matching session and fire the streaming pipeline
-  handlers.push_back(app_state->event_bus->register_handler<immer::box<events::RTPVideoPingEvent>>(
-      [ev_bus = app_state->event_bus, video_waiting_list](const immer::box<events::RTPVideoPingEvent> &ping_ev) {
-        for (immer::box<events::VideoSession> sess : video_waiting_list->load().get()) {
-          if (sess->rtp_secret_payload == ping_ev->payload || // Secret payload matching
-              (!ping_ev->payload.has_value() && ping_ev->client_ip == sess->client_ip &&
-               ping_ev->client_port == sess->port)) { // Legacy IP+port matching when no payload has been passed
-            // Found a session waiting for a ping, remove it from the list (we want to call this once)
-            video_waiting_list->update([id = sess->session_id](auto s) { return remove_session(s, id); });
-            // Start streaming
-            std::thread([sess,
-                         ev_bus,
-                         ip = ping_ev->client_ip,
-                         port = ping_ev->client_port,
-                         socket = ping_ev->video_socket.get()]() {
-              streaming::start_streaming_video(sess, ev_bus, ip, port, socket);
-            }).detach();
-          }
-        }
-      }));
-
-  /**
-   * A list of audio sessions created during RTSP and waiting for a RTP ping
-   */
-  std::shared_ptr<immer::atom<events::audio_session_list>> audio_waiting_list =
-      std::make_shared<immer::atom<events::audio_session_list>>(events::audio_session_list{});
-
-  // When an Audio session is created, add it to the waiting list
   handlers.push_back(app_state->event_bus->register_handler<immer::box<events::AudioSession>>(
-      [audio_waiting_list](const immer::box<events::AudioSession> &sess) {
-        audio_waiting_list->update([=](auto &sessions) { return sessions.push_back(sess.get()); });
-      }));
+      [ev_bus = app_state->event_bus, audio_server](const immer::box<events::AudioSession> &sess) {
+        // Start a thread that will wait for the RTP ping event
+        std::thread([sess, ev_bus, audio_server]() {
+          auto ping_ev = wait_for_ping<events::RTPAudioPingEvent>(ev_bus, sess);
 
-  // When we receive a RTP ping, look for the matching session and fire the streaming pipeline
-  handlers.push_back(app_state->event_bus->register_handler<immer::box<events::RTPAudioPingEvent>>(
-      [audio_waiting_list, audio_server, ev_bus = app_state->event_bus](
-          const immer::box<events::RTPAudioPingEvent> &ping_ev) {
-        for (immer::box<events::AudioSession> sess : audio_waiting_list->load().get()) {
-          if (sess->rtp_secret_payload == ping_ev->payload || // Secret payload matching
-              (!ping_ev->payload.has_value() && ping_ev->client_ip == sess->client_ip &&
-               ping_ev->client_port == sess->port)) { // Legacy IP+port matching when no payload has been passed
-            // Found a session waiting for a ping, remove it from the list (we want to call this once)
-            audio_waiting_list->update([id = sess->session_id](auto s) { return remove_session(s, id); });
-            std::thread([audio_server,
-                         sess,
-                         ev_bus,
-                         ip = ping_ev->client_ip,
-                         port = ping_ev->client_port,
-                         socket = ping_ev->audio_socket.get()]() {
-              // Start streaming
-              auto audio_server_name = audio_server ? audio::get_server_name(audio_server->server)
-                                                    : std::optional<std::string>();
-              auto sink_name = fmt::format("virtual_sink_{}.monitor", sess->session_id);
-              auto server_name = audio_server_name ? audio_server_name.value() : "";
+          // Start streaming
+          auto audio_server_name = audio_server ? audio::get_server_name(audio_server->server)
+                                                : std::optional<std::string>();
+          auto sink_name = fmt::format("virtual_sink_{}.monitor", sess->session_id);
+          auto server_name = audio_server_name ? audio_server_name.value() : "";
 
-              streaming::start_streaming_audio(sess, ev_bus, ip, port, socket, sink_name, server_name);
-            }).detach();
-          }
-        }
+          streaming::start_streaming_audio(sess,
+                                           ev_bus,
+                                           ping_ev->client_ip,
+                                           ping_ev->client_port,
+                                           ping_ev->audio_socket.get(),
+                                           sink_name,
+                                           server_name);
+        }).detach();
       }));
 
   return handlers.persistent();

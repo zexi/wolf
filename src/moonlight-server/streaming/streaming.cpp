@@ -166,7 +166,7 @@ send_buffer(std::shared_ptr<GstBuffer> buffer, std::shared_ptr<GstSample> sample
   if (gst_buffer_map(buffer.get(), &map, GST_MAP_READ)) {
     std::shared_ptr<GstMapInfo> map_ptr = std::make_shared<GstMapInfo>(map);
     if (!udp_sink->socket->is_open()) {
-      logs::log(logs::debug, "UDP Socket is not open");
+      logs::log(logs::warning, "UDP Socket is not open");
       udp_sink->socket->open(udp::v4());
     }
     udp_sink->socket->async_send_to(
@@ -188,36 +188,35 @@ send_buffer(std::shared_ptr<GstBuffer> buffer, std::shared_ptr<GstSample> sample
 static GstFlowReturn on_new_sample(GstAppSink *appsink, gpointer user_data) {
   std::shared_ptr<GstSample> sample(gst_app_sink_pull_sample(appsink), gst_sample_unref);
   if (!sample) {
+    logs::log(logs::warning, "Custom sink: failed to create sample");
     return GST_FLOW_ERROR;
   }
 
   UDPSink *udp_sink = static_cast<UDPSink *>(user_data);
 
-  GstBufferList *buffer_list = gst_sample_get_buffer_list(sample.get());
-  if (buffer_list) {
-    // TODO: use boost to properly send multiple buffers in one go
+  if (GstBufferList *buffer_list = gst_sample_get_buffer_list(sample.get())) {
+    // TODO: use boost to properly send multiple buffers in one go (scatter-gather I/O)
     for (guint i = 0; i < gst_buffer_list_length(buffer_list); ++i) {
       GstBuffer *buffer = gst_buffer_list_get(buffer_list, i);
       std::shared_ptr<GstBuffer> buffer_ptr(gst_buffer_ref(buffer), gst_buffer_unref);
-      return send_buffer(buffer_ptr, sample, udp_sink);
+      if (auto result = send_buffer(buffer_ptr, sample, udp_sink); result != GST_FLOW_OK) {
+        return result;
+      }
     }
+    return GST_FLOW_OK;
+  } else if (GstBuffer *buffer = gst_sample_get_buffer(sample.get())) {
+    std::shared_ptr<GstBuffer> buffer_ptr(gst_buffer_ref(buffer), gst_buffer_unref);
+    return send_buffer(buffer_ptr, sample, udp_sink);
   } else {
-    GstBuffer *buffer = gst_sample_get_buffer(sample.get());
-    if (buffer) {
-      std::shared_ptr<GstBuffer> buffer_ptr(gst_buffer_ref(buffer), gst_buffer_unref);
-      return send_buffer(buffer_ptr, sample, udp_sink);
-    }
+    logs::log(logs::warning, "Custom sink: failed to get buffer");
+    return GST_FLOW_ERROR;
   }
-  return GST_FLOW_ERROR;
 }
 
-// Configure the appsink element
 static void configure_appsink(GstElement *appsink, UDPSink *udp_sink) {
-  // Set to emit signals
-  g_object_set(appsink, "emit-signals", TRUE, NULL);
-  g_object_set(appsink, "buffer-list", FALSE, NULL); // TODO: implement this
+  g_object_set(appsink, "emit-signals", FALSE, NULL);
+  g_object_set(appsink, "buffer-list", TRUE, NULL);
 
-  // Connect the new-sample signal
   GstAppSinkCallbacks callbacks = {nullptr};
   callbacks.new_sample = on_new_sample;
   gst_app_sink_set_callbacks(GST_APP_SINK(appsink), &callbacks, udp_sink, nullptr);

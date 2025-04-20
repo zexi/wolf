@@ -121,8 +121,6 @@ struct VideoSession {
   std::array<char, 16> rtp_secret_payload;
 };
 
-using video_session_list = immer::vector<immer::box<VideoSession>>;
-
 struct AudioSession {
   std::string gst_pipeline;
 
@@ -141,8 +139,6 @@ struct AudioSession {
   int packet_duration;
   wolf::core::audio::AudioMode audio_mode;
 };
-
-using audio_session_list = immer::vector<immer::box<AudioSession>>;
 
 struct IDRRequestEvent {
   // A unique ID that identifies this session
