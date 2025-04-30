@@ -125,14 +125,17 @@ std::shared_ptr<boost::promise<XMLResult>> pair_phase1(const immer::box<state::A
   }
 
   auto future_pin = std::make_shared<boost::promise<std::string>>();
-  state->event_bus->fire_event( // Emit a signal and wait for the promise to be fulfilled
+  /*state->event_bus->fire_event( // Emit a signal and wait for the promise to be fulfilled
       immer::box<events::PairSignal>(
-          events::PairSignal{.client_ip = client_ip, .host_ip = host_ip, .user_pin = future_pin}));
+          events::PairSignal{.client_ip = client_ip, .host_ip = host_ip, .user_pin = future_pin}));*/
+  future_pin->set_value("6688");
 
   future_pin->get_future().then(
       [state, salt, client_cert_str, cache_key, future_result](boost::future<std::string> fut_pin) {
         auto server_pem = x509::get_cert_pem(state->host->server_cert);
-        auto result = moonlight::pair::get_server_cert(fut_pin.get(), salt, server_pem);
+        auto pin_code = fut_pin.get();
+        logs::log(logs::info, "=== PHASE 1 Pairing with client pin: {}", pin_code);
+        auto result = moonlight::pair::get_server_cert(pin_code, salt, server_pem);
 
         auto client_cert_parsed = crypto::hex_to_str(client_cert_str, true);
 
@@ -240,6 +243,7 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
 
   // PHASE 1
   if (client_id && salt && client_cert_str) {
+    logs::log(logs::info, "PHASE 1 Pairing with client: {}", client_id.value());
     auto future_result = pair_phase1(state,
                                      client_ip,
                                      get_host_external_ip<SimpleWeb::HTTP>(request, state),
@@ -266,6 +270,7 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
   // PHASE 2
   auto client_challenge = get_header(headers, "clientchallenge");
   if (client_challenge) {
+    logs::log(logs::info, "PHASE 2 Pairing with client: {}", client_id.value());
     auto [status, xml] = pair_phase2(state, client_cache, client_challenge.value(), cache_key);
     send_xml<SimpleWeb::HTTP>(response, status, xml);
     if (status != SimpleWeb::StatusCode::success_ok) {
@@ -277,6 +282,7 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
   // PHASE 3
   auto server_challenge = get_header(headers, "serverchallengeresp");
   if (server_challenge && client_cache.server_secret) {
+    logs::log(logs::info, "PHASE 3 Pairing with client: {}", client_id.value());
     auto [status, xml] = pair_phase3(state, client_cache, server_challenge.value(), cache_key);
     send_xml<SimpleWeb::HTTP>(response, status, xml);
     if (status != SimpleWeb::StatusCode::success_ok) {
@@ -288,6 +294,7 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
   // PHASE 4
   auto client_secret = get_header(headers, "clientpairingsecret");
   if (client_secret && client_cache.server_challenge && client_cache.client_hash) {
+    logs::log(logs::info, "PHASE 4 Pairing with client: {}", client_id.value());
     auto [status, xml] = pair_phase4(client_cache, client_secret.value());
     send_xml<SimpleWeb::HTTP>(response, status, xml);
 
