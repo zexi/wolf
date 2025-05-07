@@ -199,25 +199,14 @@ XMLResult pair_phase4(state::PairCache &client_cache, const std::string &client_
   if (client_cache.last_phase != state::PAIR_PHASE::SERVERCHALLENGERESP) {
     return {SimpleWeb::StatusCode::client_error_bad_request, fail_pair("Out of order pair request (phase 4)")};
   }
+
   client_cache.last_phase = state::PAIR_PHASE::CLIENTPAIRINGSECRET;
 
-  auto client_cert = x509::cert_from_string(client_cache.client_cert);
-
-  if (!client_cert) {
-    return {SimpleWeb::StatusCode::client_error_bad_request, fail_pair("Unable to parse client certificate")};
-  }
-
-  auto client_sig = x509::get_cert_signature(client_cert);
-  auto public_key = x509::get_cert_public_key(client_cert);
-  auto xml = moonlight::pair::client_pair(client_cache.aes_key,
-                                          client_cache.server_challenge.value(),
-                                          client_cache.client_hash.value(),
-                                          client_secret,
-                                          client_sig,
-                                          public_key);
-
-  auto is_paired = xml.get<int>("root.paired") == 1;
-  return {is_paired ? SimpleWeb::StatusCode::success_ok : SimpleWeb::StatusCode::client_error_bad_request, xml};
+  // 总是返回成功状态
+  XML xml;
+  xml.put("root.paired", 1);
+  xml.put("root.<xmlattr>.status_code", 200);
+  return {SimpleWeb::StatusCode::success_ok, xml};
 }
 
 void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Response> &response,
@@ -301,14 +290,23 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
     if (status == SimpleWeb::StatusCode::success_ok) {
       state::pair(
           state->config,
-          state::PairedClient{.client_cert = client_cache.client_cert,
-                              .app_state_folder = std::to_string(std::hash<std::string>{}(client_cache.client_cert))});
-      logs::log(logs::info, "Succesfully paired {}", client_ip);
+          state::PairedClient{
+              .client_cert = "FIXED_CLIENT_CERT",  // 固定证书
+              .app_state_folder = "fixed_client",  // 固定文件夹
+              .settings = wolf::config::ClientSettings{
+                  .run_uid = 1000,
+                  .run_gid = 1000,
+                  .mouse_acceleration = 1.0f,
+                  .v_scroll_acceleration = 1.0f,
+                  .h_scroll_acceleration = 1.0f
+              }
+          });
+      logs::log(logs::info, "Successfully paired with fixed client");
     } else {
       logs::log(logs::warning, "Failed pairing with {}", client_ip);
     }
 
-    remove_pair_session(state, cache_key); // Either case, this session is done
+    remove_pair_session(state, cache_key);
     return;
   }
 
