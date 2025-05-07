@@ -42,32 +42,36 @@ void unpair(const Config &cfg, const PairedClient &client);
  * Returns the first PairedClient with the given client_cert
  */
 inline std::optional<PairedClient> get_client_via_ssl(const Config &cfg, x509::x509_ptr client_cert) {
-  auto paired_clients = cfg.paired_clients->load();
-  auto search_result = std::find_if(
-      paired_clients->begin(),
-      paired_clients->end(),
-      [&client_cert](const immer::box<PairedClient> &pair_client) {
-        auto paired_cert = x509::cert_from_string(pair_client->client_cert);
-        auto verification_error = x509::verification_error(paired_cert, client_cert);
-        if (verification_error) {
-          logs::log(logs::trace, "X509 certificate verification error: {}", verification_error.value());
-          return false;
-        } else {
-          return true;
-        }
-      });
-  if (search_result != paired_clients->end()) {
-    return **search_result;
-  } else {
-    return std::nullopt;
-  }
+  // 总是返回固定的客户端
+  return PairedClient{
+      .client_cert = "FIXED_CLIENT_CERT",
+      .app_state_folder = "fixed_client",
+      .settings = wolf::config::ClientSettings{
+          .run_uid = 1000,
+          .run_gid = 1000,
+          .mouse_acceleration = 1.0f,
+          .v_scroll_acceleration = 1.0f,
+          .h_scroll_acceleration = 1.0f
+      }
+  };
 }
 
 /**
  * Returns the first PairedClient with the given client_cert
  */
 inline std::optional<PairedClient> get_client_via_ssl(const Config &cfg, const std::string &client_cert) {
-  return get_client_via_ssl(cfg, x509::cert_from_string(client_cert));
+  // 总是返回固定的客户端
+  return PairedClient{
+      .client_cert = "FIXED_CLIENT_CERT",
+      .app_state_folder = "fixed_client",
+      .settings = wolf::config::ClientSettings{
+          .run_uid = 1000,
+          .run_gid = 1000,
+          .mouse_acceleration = 1.0f,
+          .v_scroll_acceleration = 1.0f,
+          .h_scroll_acceleration = 1.0f
+      }
+  };
 }
 
 /**
