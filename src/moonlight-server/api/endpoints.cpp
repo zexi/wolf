@@ -220,6 +220,7 @@ void UnixSocketServer::endpoint_StreamSessionStart(const HTTPRequest &req, std::
 
 void UnixSocketServer::endpoint_StreamSessionPause(const HTTPRequest &req, std::shared_ptr<UnixSocket> socket) {
   auto session = rfl::json::read<StreamSessionPauseRequest>(req.body);
+
   if (session) {
     auto sessions = state_->app_state->running_sessions->load();
     auto session_id = std::stoul(session.value().session_id);
