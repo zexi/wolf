@@ -102,6 +102,7 @@ struct VideoSession {
 
   // A unique ID that identifies this session
   std::size_t session_id;
+  std::string rtsp_fake_ip;
 
   std::uint16_t port;
   int timeout_ms;
@@ -126,6 +127,7 @@ struct AudioSession {
 
   // A unique ID that identifies this session
   std::size_t session_id;
+  std::string rtsp_fake_ip;
 
   bool encrypt_audio;
   std::string aes_key;
@@ -143,18 +145,22 @@ struct AudioSession {
 struct IDRRequestEvent {
   // A unique ID that identifies this session
   std::size_t session_id;
+  std::string rtsp_fake_ip;
 };
 
 struct PauseStreamEvent {
   std::size_t session_id;
+  std::string rtsp_fake_ip;
 };
 
 struct ResumeStreamEvent {
   std::size_t session_id;
+  std::string rtsp_fake_ip;
 };
 
 struct StopStreamEvent {
   std::size_t session_id;
+  std::string rtsp_fake_ip;
 };
 
 struct RTPVideoPingEvent {

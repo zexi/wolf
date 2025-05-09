@@ -221,6 +221,7 @@ announce(const RTSP_PACKET &req, const events::StreamSession &session) {
       .gst_pipeline = gst_pipeline,
 
       .session_id = session.session_id,
+      .rtsp_fake_ip = session.rtsp_fake_ip,
 
       .port = session.video_stream_port,
       .timeout_ms = args["x-nv-video[0].timeoutLengthMs"].value_or(7000),
@@ -246,7 +247,7 @@ announce(const RTSP_PACKET &req, const events::StreamSession &session) {
       .gst_pipeline = session.app->opus_gst_pipeline,
 
       .session_id = session.session_id,
-
+      .rtsp_fake_ip = session.rtsp_fake_ip,
       .encrypt_audio = static_cast<bool>(args["x-nv-general.featureFlags"].value_or(167) & 0x20),
       .aes_key = session.aes_key,
       .aes_iv = session.aes_iv,
