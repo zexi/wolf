@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=ghcr.io/games-on-whales/gstreamer:1.24.6
+ARG BASE_IMAGE=ghcr.io/games-on-whales/gstreamer:1.26.2
 ########################################################
 FROM $BASE_IMAGE AS wolf-builder
 
@@ -14,6 +14,7 @@ RUN apt-get update -y && \
     ccache \
     git \
     clang \
+    build-essential \
     libboost-thread-dev libboost-locale-dev libboost-filesystem-dev libboost-log-dev libboost-stacktrace-dev libboost-container-dev \
     libwayland-dev libwayland-server0 libinput-dev libxkbcommon-dev libgbm-dev \
     libcurl4-openssl-dev \
@@ -41,9 +42,9 @@ RUN <<_GST_WAYLAND_DISPLAY
 
     git clone https://github.com/games-on-whales/gst-wayland-display
     cd gst-wayland-display
-    git checkout a31f5a0
-    cargo install --locked cargo-c
-    cargo cinstall -p c-bindings --prefix=/usr/local --libdir=/usr/local/lib/
+    git checkout 5e4f170
+    cargo install cargo-c
+    cargo cinstall -p gst-plugin-wayland-display --prefix=/usr/local/lib/x86_64-linux-gnu/ --libdir=/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0
 _GST_WAYLAND_DISPLAY
 
 COPY . /wolf/
@@ -77,6 +78,7 @@ RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
+    libicu76 \
     libevdev2 \
     libudev1 \
     libcurl4 \
@@ -107,6 +109,9 @@ COPY --from=wolf-builder /wolf/wolf /wolf/wolf
 COPY --from=wolf-builder /wolf/fake-udev /wolf/fake-udev
 
 ENV XDG_RUNTIME_DIR=/tmp/sockets \
+    GST_GL_API=gles2 \
+    GST_GL_WINDOW=surfaceless \
+    WOLF_USE_ZERO_COPY=TRUE \
     WOLF_LOG_LEVEL=INFO \
     WOLF_CFG_FILE=$WOLF_CFG_FOLDER/config.toml \
     WOLF_PRIVATE_KEY_FILE=$WOLF_CFG_FOLDER/key.pem \

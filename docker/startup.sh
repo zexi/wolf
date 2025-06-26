@@ -7,6 +7,11 @@ set -e
 # and https://github.com/games-on-whales/wolf/issues/64#issuecomment-1951479056
 mkdir -p $WOLF_CFG_FOLDER
 
+# Set default values for environment variables
+export WOLF_RENDER_NODE=${WOLF_RENDER_NODE:-/dev/dri/renderD128}
+export WOLF_ENCODER_NODE=${WOLF_ENCODER_NODE:-$WOLF_RENDER_NODE}
+export GST_GL_DRM_DEVICE=${GST_GL_DRM_DEVICE:-$WOLF_ENCODER_NODE}
+
 # Update fake-udev if missing from the path
 export WOLF_DOCKER_FAKE_UDEV_PATH=${WOLF_DOCKER_FAKE_UDEV_PATH:-$HOST_APPS_STATE_FOLDER/fake-udev}
 cp /wolf/fake-udev $WOLF_DOCKER_FAKE_UDEV_PATH

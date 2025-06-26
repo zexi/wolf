@@ -96,7 +96,7 @@ jobs:
           context: docker/
           file: docker/gpu-drivers.Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/gpu-drivers:2023.11,gameonwhales/gpu-drivers:2023.11 # TODO: set build version as param
+          tags: ghcr.io/${{ github.repository_owner }}/gpu-drivers:2025.05,gameonwhales/gpu-drivers:2025.05 # TODO: set build version as param
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gpu-drivers:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gpu-drivers:buildcache,mode=max
@@ -109,9 +109,9 @@ jobs:
           file: docker/gstreamer.Dockerfile
           push: true
           build-args: |
-            GSTREAMER_VERSION=1.25.1
-            BASE_IMAGE=ghcr.io/${{ github.repository_owner }}/gpu-drivers:2023.11
-          tags: ghcr.io/${{ github.repository_owner }}/gstreamer:1.25.1,gameonwhales/gstreamer:1.25.1 # TODO: set gstreamer version as param
+            GSTREAMER_VERSION=1.26.2
+            BASE_IMAGE=ghcr.io/${{ github.repository_owner }}/gpu-drivers:2025.05
+          tags: ghcr.io/${{ github.repository_owner }}/gstreamer:1.26.2,gameonwhales/gstreamer:1.26.2 # TODO: set gstreamer version as param
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gstreamer:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/gstreamer:buildcache,mode=max
@@ -126,7 +126,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            BASE_IMAGE=ghcr.io/${{ github.repository_owner }}/gstreamer:1.25.1
+            BASE_IMAGE=ghcr.io/${{ github.repository_owner }}/gstreamer:1.26.2
             IMAGE_SOURCE=${{ steps.prep.outputs.github_server_url }}/${{ github.repository }}
           cache-from: ${{ steps.prep.outputs.cache_from }}
           cache-to: ${{ steps.prep.outputs.cache_to }}
@@ -151,7 +151,7 @@ jobs:
         with:
           imageTag: devcontainer
           imageName: ghcr.io/${{ github.repository_owner }}/wolf
-          cacheFrom: ghcr.io/${{ github.repository_owner }}/wolf:${{github.ref_name}}
+          cacheFrom: ghcr.io/${{ github.repository_owner }}/wolf:buildcache
           push: never
           # TODO:
           # runCmd: |
