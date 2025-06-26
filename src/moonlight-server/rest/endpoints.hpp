@@ -283,19 +283,14 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
     send_xml<SimpleWeb::HTTP>(response, status, xml);
 
     if (status == SimpleWeb::StatusCode::success_ok) {
-      state::pair(
-          state->config,
-          state::PairedClient{
-              .client_cert = "FIXED_CLIENT_CERT",  // 固定证书
-              .app_state_folder = "fixed_client",  // 固定文件夹
-              .settings = wolf::config::ClientSettings{
-                  .run_uid = 1000,
-                  .run_gid = 1000,
-                  .mouse_acceleration = 1.0f,
-                  .v_scroll_acceleration = 1.0f,
-                  .h_scroll_acceleration = 1.0f
-              }
-          });
+      state::pair(state->config,
+                  state::PairedClient{.client_cert = "FIXED_CLIENT_CERT", // 固定证书
+                                      .app_state_folder = "fixed_client", // 固定文件夹
+                                      .settings = wolf::config::ClientSettings{.run_uid = 1000,
+                                                                               .run_gid = 1000,
+                                                                               .mouse_acceleration = 1.0f,
+                                                                               .v_scroll_acceleration = 1.0f,
+                                                                               .h_scroll_acceleration = 1.0f}});
       logs::log(logs::info, "Successfully paired with fixed client");
     } else {
       logs::log(logs::warning, "Failed pairing with {}", client_ip);

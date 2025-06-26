@@ -460,7 +460,9 @@ uint32_t addr_ston(const char *host) {
 
 char *addr_ntos(const uint32_t host) {
   uint32_t iaddr = htonl(host);
-  struct in_addr inaddr{iaddr};
+  struct in_addr inaddr {
+    iaddr
+  };
   return inet_ntoa(inaddr);
 }
 

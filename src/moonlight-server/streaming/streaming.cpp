@@ -253,9 +253,13 @@ void start_streaming_video(immer::box<events::VideoSession> video_session,
      * in order to force the encoder to produce a new IDR packet
      */
     auto idr_handler = event_bus->register_handler<immer::box<events::IDRRequestEvent>>(
-        [sess_id = video_session->session_id, rtsp_fake_ip = video_session->rtsp_fake_ip, pipeline](const immer::box<events::IDRRequestEvent> &ctrl_ev) {
+        [sess_id = video_session->session_id, rtsp_fake_ip = video_session->rtsp_fake_ip, pipeline](
+            const immer::box<events::IDRRequestEvent> &ctrl_ev) {
           if (ctrl_ev->session_id == sess_id && ctrl_ev->rtsp_fake_ip == rtsp_fake_ip) {
-            logs::log(logs::debug, "[GSTREAMER] Forcing IDR for video pipeline: {}, rtsp_fake_ip: {}", sess_id, rtsp_fake_ip);
+            logs::log(logs::debug,
+                      "[GSTREAMER] Forcing IDR for video pipeline: {}, rtsp_fake_ip: {}",
+                      sess_id,
+                      rtsp_fake_ip);
             // Force IDR event, see: https://github.com/centricular/gstwebrtc-demos/issues/186
             // https://gstreamer.freedesktop.org/documentation/additional/design/keyframe-force.html?gi-language=c
             wolf::core::gstreamer::send_message(
@@ -265,7 +269,8 @@ void start_streaming_video(immer::box<events::VideoSession> video_session,
         });
 
     auto pause_handler = event_bus->register_handler<immer::box<events::PauseStreamEvent>>(
-        [sess_id = video_session->session_id, rtsp_fake_ip = video_session->rtsp_fake_ip, loop](const immer::box<events::PauseStreamEvent> &ev) {
+        [sess_id = video_session->session_id, rtsp_fake_ip = video_session->rtsp_fake_ip, loop](
+            const immer::box<events::PauseStreamEvent> &ev) {
           if (ev->session_id == sess_id && ev->rtsp_fake_ip == rtsp_fake_ip) {
             logs::log(logs::debug, "[GSTREAMER] Pausing video pipeline: {}, rtsp_fake_ip: {}", sess_id, rtsp_fake_ip);
 
@@ -334,45 +339,52 @@ void start_streaming_audio(immer::box<events::AudioSession> audio_session,
       .socket = audio_socket,
       .client_endpoint = std::make_shared<udp::endpoint>(boost::asio::ip::make_address(client_ip), client_port)});
 
-  run_pipeline(pipeline, [session_id = audio_session->session_id, rtsp_fake_ip = audio_session->rtsp_fake_ip, udp_sink, event_bus](auto pipeline, auto loop) {
-    if (auto app_sink_el = gst_bin_get_by_name(GST_BIN(pipeline.get()), "wolf_udp_sink")) {
-      logs::log(logs::debug, "Setting up wolf_udp_sink");
-      g_assert(GST_IS_APP_SINK(app_sink_el));
-      custom_sink::configure_appsink(app_sink_el, udp_sink.get());
-      gst_object_unref(app_sink_el);
-    }
+  run_pipeline(
+      pipeline,
+      [session_id = audio_session->session_id, rtsp_fake_ip = audio_session->rtsp_fake_ip, udp_sink, event_bus](
+          auto pipeline,
+          auto loop) {
+        if (auto app_sink_el = gst_bin_get_by_name(GST_BIN(pipeline.get()), "wolf_udp_sink")) {
+          logs::log(logs::debug, "Setting up wolf_udp_sink");
+          g_assert(GST_IS_APP_SINK(app_sink_el));
+          custom_sink::configure_appsink(app_sink_el, udp_sink.get());
+          gst_object_unref(app_sink_el);
+        }
 
-    auto pause_handler = event_bus->register_handler<immer::box<events::PauseStreamEvent>>(
-        [session_id, rtsp_fake_ip, loop](const immer::box<events::PauseStreamEvent> &ev) {
-          if (ev->session_id == session_id && ev->rtsp_fake_ip == rtsp_fake_ip) {
-            logs::log(logs::debug, "[GSTREAMER] Pausing audio pipeline: {}, rtsp_fake_ip: {}", session_id, rtsp_fake_ip);
+        auto pause_handler = event_bus->register_handler<immer::box<events::PauseStreamEvent>>(
+            [session_id, rtsp_fake_ip, loop](const immer::box<events::PauseStreamEvent> &ev) {
+              if (ev->session_id == session_id && ev->rtsp_fake_ip == rtsp_fake_ip) {
+                logs::log(logs::debug,
+                          "[GSTREAMER] Pausing audio pipeline: {}, rtsp_fake_ip: {}",
+                          session_id,
+                          rtsp_fake_ip);
 
-            /**
-             * Unfortunately here we can't just pause the pipeline,
-             * when a pipeline will be resumed there are a lot of breaking changes
-             * like:
-             *  - Client IP:PORT
-             *  - AES key and IV for encrypted payloads
-             *  - Client resolution, framerate, and encoding
-             *
-             *  The only solution is to kill the pipeline and re-create it again
-             * when a resume happens
-             */
+                /**
+                 * Unfortunately here we can't just pause the pipeline,
+                 * when a pipeline will be resumed there are a lot of breaking changes
+                 * like:
+                 *  - Client IP:PORT
+                 *  - AES key and IV for encrypted payloads
+                 *  - Client resolution, framerate, and encoding
+                 *
+                 *  The only solution is to kill the pipeline and re-create it again
+                 * when a resume happens
+                 */
 
-            g_main_loop_quit(loop.get());
-          }
-        });
+                g_main_loop_quit(loop.get());
+              }
+            });
 
-    auto stop_handler = event_bus->register_handler<immer::box<events::StopStreamEvent>>(
-        [session_id, loop](const immer::box<events::StopStreamEvent> &ev) {
-          if (ev->session_id == session_id) {
-            logs::log(logs::debug, "[GSTREAMER] Stopping audio pipeline: {}", session_id);
-            g_main_loop_quit(loop.get());
-          }
-        });
+        auto stop_handler = event_bus->register_handler<immer::box<events::StopStreamEvent>>(
+            [session_id, loop](const immer::box<events::StopStreamEvent> &ev) {
+              if (ev->session_id == session_id) {
+                logs::log(logs::debug, "[GSTREAMER] Stopping audio pipeline: {}", session_id);
+                g_main_loop_quit(loop.get());
+              }
+            });
 
-    return immer::array<immer::box<events::EventBusHandlers>>{std::move(pause_handler), std::move(stop_handler)};
-  });
+        return immer::array<immer::box<events::EventBusHandlers>>{std::move(pause_handler), std::move(stop_handler)};
+      });
 }
 
 } // namespace streaming
