@@ -133,6 +133,11 @@ std::vector<std::string> linked_devices(std::string_view gpu) {
         found_devices.emplace_back("/dev/nvidiactl");
       }
     }
+
+    std::string render_node = device->nodes[DRM_NODE_RENDER];
+    if (render_node != primary_node) {
+      found_devices.emplace_back(render_node);
+    }
   } else {
     logs::log(logs::warning, "{} doesn't have a primary node! Available nodes: {}", gpu, device->available_nodes);
   }
@@ -172,6 +177,19 @@ GPU_VENDOR get_vendor(std::string_view gpu) {
 
   logs::log(logs::warning, "Unable to recognise GPU vendor: {}", vendor_name);
   return UNKNOWN;
+}
+
+std::string get_vendor_name(GPU_VENDOR vendor) {
+  switch (vendor) {
+  case NVIDIA:
+    return "Nvidia";
+  case AMD:
+    return "AMD";
+  case INTEL:
+    return "Intel";
+  default:
+    return "Unknown";
+  }
 }
 
 std::string get_ip_address(ifaddrs *ifa) {

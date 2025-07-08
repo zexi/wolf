@@ -2,8 +2,6 @@ name: Linux build and test
 
 on:
   push:
-    branches:
-      - stable
     paths-ignore:
       - "docs/**"
       - "docker/**"
@@ -14,6 +12,8 @@ on:
 
 jobs:
   test-arm:
+    # Avoid workflows to run twice for PRs (https://github.com/orgs/community/discussions/57827)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     timeout-minutes: 30
     runs-on: [ self-hosted, ARM64 ] # self-hosted, using Oracle free tier instance
     steps:
@@ -47,7 +47,7 @@ jobs:
         run: |
           git clone https://github.com/games-on-whales/gst-wayland-display
           cd gst-wayland-display
-          git checkout a31f5a0
+          git checkout b3b34d8
           cargo install --locked cargo-c
           cargo cinstall -p c-bindings --prefix=/usr/local
 
@@ -70,7 +70,6 @@ jobs:
                 -DCMAKE_CXX_EXTENSIONS=OFF \
                 -DTEST_VIRTUAL_INPUT=OFF \
                 -DTEST_DOCKER=ON \
-                -DTEST_RUST_WAYLAND=ON \
                 -DTEST_NVIDIA=OFF \
                 -DTEST_EXCEPTIONS=OFF \
                 -DTEST_UHID=OFF \
@@ -99,6 +98,7 @@ jobs:
 
   # First build the common dependencies: Rust-based libgstwaylanddisplay
   build-gst-wayland:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-24.04
     steps:
       - name: Prepare environment
@@ -120,7 +120,7 @@ jobs:
         run: |
           git clone https://github.com/games-on-whales/gst-wayland-display
           cd gst-wayland-display
-          git checkout a31f5a0
+          git checkout b3b34d8
           cargo install --locked cargo-c
           cargo cinstall -p c-bindings --prefix=/usr/local --destdir=${{runner.workspace}}
 
@@ -135,6 +135,7 @@ jobs:
           if-no-files-found: error
 
   test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
     runs-on: ubuntu-24.04
     needs: build-gst-wayland
     strategy:
@@ -205,8 +206,7 @@ jobs:
                 -DCATCH_DEVELOPMENT_BUILD=ON \
                 -DTEST_VIRTUAL_INPUT=OFF \
                 -DTEST_DOCKER=OFF \
-                -DLINK_RUST_WAYLAND=ON \
-                -DTEST_RUST_WAYLAND=OFF \
+                -DLINK_RUST_WAYLAND=OFF \
                 -DTEST_NVIDIA=OFF \
                 -DTEST_SDL=OFF \
                 -G Ninja
