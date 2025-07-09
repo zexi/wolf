@@ -425,7 +425,7 @@ Now, we need to edit LXC config file to passtrough the GPU.
 [%collapsible]
 ====
 
-The easiest way to create an LXC to run Wolf is to use https://tteck.github.io/Proxmox/#docker-lxc[tteck's PVE docker script], this will create you a LXC with docker already good to go.
+The easiest way to create an LXC to run Wolf is to use https://community-scripts.github.io/ProxmoxVE/scripts?id=docker[tteck's PVE docker script], this will create you a LXC with docker already good to go.
 (Make sure you choose privileged LXC and install docker-compose when prompted)
 
 ====

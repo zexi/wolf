@@ -105,6 +105,16 @@ get_encoder(std::string_view tech, const std::vector<GstEncoder> &encoders, cons
   return std::nullopt;
 }
 
+/**
+ * ID is used by Moonlight to uniquely identify the app.
+ * We have to change it if we change something that will be displayed
+ */
+std::string generate_app_id(const BaseApp &app) {
+  auto hash = utils::hash(app.icon_png_path.value_or("") + app.title);
+  // Value must be truncated to signed 32-bit range due to client limitations
+  return std::to_string(abs((int32_t)hash));
+}
+
 Config load_or_default(const std::string &source,
                        const std::shared_ptr<events::EventBusType> &ev_bus,
                        state::SessionsAtoms running_sessions) {
@@ -116,22 +126,22 @@ Config load_or_default(const std::string &source,
   // First check the version of the config file
   auto base_cfg = rfl::toml::load<BaseConfig, rfl::DefaultIfMissing>(source).value();
   auto version = base_cfg.config_version.value_or(0);
-  if (version <= 3) {
+  if (version <= 4) {
     logs::log(logs::warning, "Found old config file, migrating to newer version");
 
-    std::filesystem::rename(source, source + ".v3.old");
-    auto v3 = toml::parse_file(source + ".v3.old");
+    std::filesystem::rename(source, source + ".old");
+    auto v3 = toml::parse_file(source + ".old");
     create_default(source);
-    auto v4 = toml::parse_file(source);
+    auto v5 = toml::parse_file(source);
     // Copy back everything apart from the Gstreamer pipelines
-    v4.insert_or_assign("hostname", v3.at("hostname"));
-    v4.insert_or_assign("uuid", v3.at("uuid"));
-    v4.insert_or_assign("apps", v3.at("apps"));
-    v4.insert_or_assign("paired_clients", v3.at("paired_clients"));
+    v5.insert_or_assign("hostname", v3.at("hostname"));
+    v5.insert_or_assign("uuid", v3.at("uuid"));
+    v5.insert_or_assign("apps", v3.at("apps"));
+    v5.insert_or_assign("paired_clients", v3.at("paired_clients"));
 
     std::ofstream out_file;
     out_file.open(source);
-    out_file << v4;
+    out_file << v5;
     out_file.close();
   }
 
@@ -141,8 +151,9 @@ Config load_or_default(const std::string &source,
   auto default_gst_video_settings = cfg.gstreamer.video;
   if (default_gst_video_settings.default_source.find("appsrc") != std::string::npos) {
     logs::log(logs::debug, "Found appsrc in default_source, migrating to interpipesrc");
-    default_gst_video_settings.default_source = "interpipesrc listen-to={session_id}_video is-live=true "
-                                                "stream-sync=restart-ts max-buffers=1 block=false";
+    default_gst_video_settings.default_source =
+        "interpipesrc listen-to={session_id}_video is-live=true "
+        "stream-sync=restart-ts max-bytes=0 max-buffers=1 leaky-type=downstream";
   }
   if (default_gst_video_settings.default_sink.find("udpsink") != std::string::npos) {
     logs::log(logs::debug, "Found udpsink in default_sink, migrating to appsink");
@@ -167,29 +178,17 @@ Config load_or_default(const std::string &source,
   }
 
   auto default_gst_encoder_settings = default_gst_video_settings.defaults;
-  auto update_leaky_queue = [](std::string &pipeline) {
-    std::string old_str = "queue";
-    auto replace_pos = pipeline.find(old_str);
-    pipeline.replace(replace_pos, old_str.size(), "queue leaky=downstream max-size-buffers=1 ");
-  };
-  if (default_gst_encoder_settings["nvcodec"].video_params.find("queue !") != std::string::npos) {
-    logs::log(logs::debug, "Found leaky queue in nvcodec, migrating to queue leaky=downstream");
-    update_leaky_queue(default_gst_encoder_settings["nvcodec"].video_params);
-  }
-  if (default_gst_encoder_settings["vaapi"].video_params.find("queue !") != std::string::npos) {
-    logs::log(logs::debug, "Found leaky queue in vaapi, migrating to queue leaky=downstream");
-    update_leaky_queue(default_gst_encoder_settings["vaapi"].video_params);
-  }
-  if (default_gst_encoder_settings["qsv"].video_params.find("queue !") != std::string::npos) {
-    logs::log(logs::debug, "Found leaky queue in qsv, migrating to queue leaky=downstream");
-    update_leaky_queue(default_gst_encoder_settings["qsv"].video_params);
-  }
+  bool use_zero_copy = utils::get_env("WOLF_USE_ZERO_COPY", "") != std::string("FALSE");
 
   auto default_app_render_node = utils::get_env("WOLF_RENDER_NODE", "/dev/dri/renderD128");
   auto default_gst_render_node = utils::get_env("WOLF_ENCODER_NODE", default_app_render_node);
   auto vendor = get_vendor(default_gst_render_node);
+  if (vendor == GPU_VENDOR::UNKNOWN) {
+    logs::log(logs::warning, "Unable to detect GPU vendor, disabling zero copy pipeline.");
+    use_zero_copy = false;
+  }
 
-  /* Automatic pick best encoders */
+  /* Automatically pick the best encoders */
   auto h264_encoder = get_encoder("H264", default_gst_video_settings.h264_encoders, vendor);
   if (!h264_encoder) {
     throw std::runtime_error(
@@ -205,20 +204,71 @@ Config load_or_default(const std::string &source,
       | ranges::views::transform([](const PairedClient &client) { return immer::box<PairedClient>{client}; }) //
       | ranges::to<immer::vector<immer::box<PairedClient>>>();
 
-  auto default_h264 =
-      utils::get_optional(default_gst_encoder_settings, h264_encoder.value_or(GstEncoder{}).plugin_name);
-  auto default_hevc =
-      utils::get_optional(default_gst_encoder_settings, hevc_encoder.value_or(GstEncoder{}).plugin_name);
-  auto default_av1 = utils::get_optional(default_gst_encoder_settings, av1_encoder.value_or(GstEncoder{}).plugin_name);
-
   auto default_base_video = BaseAppVideoOverride{};
+  auto video_encoder = encoder_type(*h264_encoder);
+  std::string default_video_producer_buffer_caps = "video/x-raw";
+  if (use_zero_copy) {
+    switch (video_encoder) {
+    case NVIDIA: {
+      default_video_producer_buffer_caps = "video/x-raw(memory:DMABuf)";
+      break;
+    }
+    case VAAPI:
+    case QUICKSYNC: {
+      auto required_caps = gstreamer::get_dma_caps("vapostproc");
+      logs::log(logs::debug, "Required DMA formats for vapostproc: {}", required_caps);
+      auto gst_caps = required_caps | //
+                      ranges::views::remove_if([](const std::string &cap) {
+                        // TODO: HDR isn't supported by Wolf yet (so we remove P010 and AR30 format)
+                        return cap.find("P010") != std::string::npos || cap.find("AR30") != std::string::npos ||
+                               // We also remove formats that are padded with spaces since they need escaping
+                               cap.find(" ") != std::string::npos;
+                      }) | //
+                      ranges::to<std::vector>();
+      if (gst_caps.empty()) {
+        logs::log(logs::warning,
+                  "Unable to find any compatible DMA formats for vapostproc, disabling zero copy pipeline.");
+        use_zero_copy = false;
+      } else {
+        default_video_producer_buffer_caps =
+            fmt::format("video/x-raw(memory:DMABuf), drm-format={{{}}}", utils::join(gst_caps, ","));
+      }
+      break;
+    }
+    default: {
+    }
+    }
+  }
 
+  logs::log(logs::info,
+            "Using {} pipeline on {} ({})",
+            use_zero_copy ? "zero copy" : "legacy",
+            get_vendor_name(vendor),
+            default_gst_render_node);
+
+  auto empty_enc = GstEncoderDefault{};
+  auto default_h264 = utils::get_optional(default_gst_encoder_settings, h264_encoder.value_or(GstEncoder{}).plugin_name)
+                          .value_or(empty_enc);
+  auto default_hevc = utils::get_optional(default_gst_encoder_settings, hevc_encoder.value_or(GstEncoder{}).plugin_name)
+                          .value_or(empty_enc);
+  auto default_av1 = utils::get_optional(default_gst_encoder_settings, av1_encoder.value_or(GstEncoder{}).plugin_name)
+                         .value_or(empty_enc);
+
+  auto h264_video_params = use_zero_copy
+                               ? h264_encoder->video_params_zero_copy.value_or(default_h264.video_params_zero_copy)
+                               : h264_encoder->video_params.value_or(default_h264.video_params);
+
+  auto hevc_video_params = use_zero_copy
+                               ? hevc_encoder->video_params_zero_copy.value_or(default_hevc.video_params_zero_copy)
+                               : hevc_encoder->video_params.value_or(default_hevc.video_params);
+
+  auto av1_video_params = use_zero_copy
+                              ? av1_encoder->video_params_zero_copy.value_or(default_av1.video_params_zero_copy)
+                              : av1_encoder->video_params.value_or(default_av1.video_params);
   /* Get apps, here we'll merge the default gstreamer settings with the app specific overrides */
   auto apps =
-      cfg.apps |                                                     //
-      ranges::views::enumerate |                                     //
-      ranges::views::transform([&](std::pair<int, BaseApp &> pair) { //
-        auto [idx, app] = pair;
+      cfg.apps |                                         //
+      ranges::views::transform([&](const BaseApp &app) { //
         auto app_render_node = app.render_node.value_or(default_app_render_node);
         if (app_render_node != default_gst_render_node) {
           logs::log(logs::warning,
@@ -229,38 +279,32 @@ Config load_or_default(const std::string &source,
           // TODO: allow user to override gst_render_node
         }
 
+        auto app_video_settings = app.video.value_or(default_base_video);
+
         auto h264_gst_pipeline = fmt::format(
             "{} !\n{} !\n{} !\n{}", //
-            app.video.value_or(default_base_video).source.value_or(default_gst_video_settings.default_source),
-            app.video.value_or(default_base_video)
-                .video_params.value_or(
-                    h264_encoder->video_params.value_or(default_h264.value_or(GstEncoderDefault{}).video_params)),
-            app.video.value_or(default_base_video).h264_encoder.value_or(h264_encoder->encoder_pipeline),
-            app.video.value_or(default_base_video).sink.value_or(default_gst_video_settings.default_sink));
+            app_video_settings.source.value_or(default_gst_video_settings.default_source),
+            app_video_settings.video_params.value_or(h264_video_params),
+            app_video_settings.h264_encoder.value_or(h264_encoder->encoder_pipeline),
+            app_video_settings.sink.value_or(default_gst_video_settings.default_sink));
 
         auto hevc_gst_pipeline =
             hevc_encoder.has_value()
-                ? fmt::format(
-                      "{} !\n{} !\n{} !\n{}", //
-                      app.video.value_or(default_base_video).source.value_or(default_gst_video_settings.default_source),
-                      app.video.value_or(default_base_video)
-                          .video_params.value_or(hevc_encoder->video_params.value_or(
-                              default_hevc.value_or(GstEncoderDefault{}).video_params)),
-                      app.video.value_or(default_base_video).hevc_encoder.value_or(hevc_encoder->encoder_pipeline),
-                      app.video.value_or(default_base_video).sink.value_or(default_gst_video_settings.default_sink))
+                ? fmt::format("{} !\n{} !\n{} !\n{}", //
+                              app_video_settings.source.value_or(default_gst_video_settings.default_source),
+                              app_video_settings.video_params.value_or(hevc_video_params),
+                              app_video_settings.hevc_encoder.value_or(hevc_encoder->encoder_pipeline),
+                              app_video_settings.sink.value_or(default_gst_video_settings.default_sink))
                 : "";
 
-        auto av1_gst_pipeline =
-            av1_encoder.has_value()
-                ? fmt::format(
-                      "{} !\n{} !\n{} !\n{}", //
-                      app.video.value_or(default_base_video).source.value_or(default_gst_video_settings.default_source),
-                      app.video.value_or(default_base_video)
-                          .video_params.value_or(av1_encoder->video_params.value_or(
-                              default_av1.value_or(GstEncoderDefault{}).video_params)),
-                      app.video.value_or(default_base_video).av1_encoder.value_or(av1_encoder->encoder_pipeline),
-                      app.video.value_or(default_base_video).sink.value_or(default_gst_video_settings.default_sink))
-                : "";
+        auto av1_gst_pipeline = av1_encoder.has_value()
+                                    ? fmt::format(
+                                          "{} !\n{} !\n{} !\n{}", //
+                                          app_video_settings.source.value_or(default_gst_video_settings.default_source),
+                                          app_video_settings.video_params.value_or(av1_video_params),
+                                          app_video_settings.av1_encoder.value_or(av1_encoder->encoder_pipeline),
+                                          app_video_settings.sink.value_or(default_gst_video_settings.default_sink))
+                                    : "";
 
         auto opus_gst_pipeline = fmt::format(
             "{} !\n{} !\n{} !\n{}", //
@@ -273,9 +317,11 @@ Config load_or_default(const std::string &source,
 
         return immer::box<events::App>{
             events::App{.base = {.title = app.title,
-                                 .id = std::to_string(idx + 1),
+                                 .id = generate_app_id(app),
                                  .support_hdr = false,
                                  .icon_png_path = app.icon_png_path},
+                        .video_producer_buffer_caps =
+                            app_video_settings.producer_buffer_caps.value_or(default_video_producer_buffer_caps),
                         .h264_gst_pipeline = h264_gst_pipeline,
                         .hevc_gst_pipeline = hevc_gst_pipeline,
                         .av1_gst_pipeline = av1_gst_pipeline,

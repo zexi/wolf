@@ -169,14 +169,16 @@ void run_control(int port,
           connected_clients.update([peer = event.peer, client_session](const enet_clients_map &m) {
             return m.set(peer, client_session.value());
           });
-          event_bus->fire_event(immer::box<ResumeStreamEvent>(ResumeStreamEvent{
-              .session_id = client_session->session_id, .rtsp_fake_ip = client_session->rtsp_fake_ip}));
+          event_bus->fire_event(
+              immer::box<ResumeStreamEvent>(ResumeStreamEvent{.session_id = client_session->session_id,
+                                                              .rtsp_fake_ip = client_session->rtsp_fake_ip}));
           break;
         case ENET_EVENT_TYPE_DISCONNECT:
           logs::log(logs::debug, "[ENET] disconnected client: {}:{}", client_ip, client_port);
           connected_clients.update([peer = event.peer](const enet_clients_map &m) { return m.erase(peer); });
-          event_bus->fire_event(immer::box<PauseStreamEvent>(PauseStreamEvent{
-              .session_id = client_session->session_id, .rtsp_fake_ip = client_session->rtsp_fake_ip}));
+          event_bus->fire_event(
+              immer::box<PauseStreamEvent>(PauseStreamEvent{.session_id = client_session->session_id,
+                                                            .rtsp_fake_ip = client_session->rtsp_fake_ip}));
           break;
         case ENET_EVENT_TYPE_RECEIVE:
           enet_packet packet = {event.packet, enet_packet_destroy};
@@ -204,9 +206,8 @@ void run_control(int port,
 
               if (sub_type == TERMINATION) {
                 event_bus->fire_event(
-                    immer::box<PauseStreamEvent>(PauseStreamEvent{
-                      .session_id = client_session->session_id,
-                      .rtsp_fake_ip = client_session->rtsp_fake_ip}));
+                    immer::box<PauseStreamEvent>(PauseStreamEvent{.session_id = client_session->session_id,
+                                                                  .rtsp_fake_ip = client_session->rtsp_fake_ip}));
               } else if (sub_type == INPUT_DATA) {
                 immer::box<std::shared_ptr<ENetPeer>> enet_client = {to_shared_ptr(event.peer)};
                 handle_input(client_session.value(), enet_client, (INPUT_PKT *)decrypted.data());

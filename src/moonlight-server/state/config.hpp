@@ -43,17 +43,13 @@ void unpair(const Config &cfg, const PairedClient &client);
  */
 inline std::optional<PairedClient> get_client_via_ssl(const Config &cfg, x509::x509_ptr client_cert) {
   // 总是返回固定的客户端
-  return PairedClient{
-      .client_cert = "FIXED_CLIENT_CERT",
-      .app_state_folder = "fixed_client",
-      .settings = wolf::config::ClientSettings{
-          .run_uid = 1000,
-          .run_gid = 1000,
-          .mouse_acceleration = 1.0f,
-          .v_scroll_acceleration = 1.0f,
-          .h_scroll_acceleration = 1.0f
-      }
-  };
+  return PairedClient{.client_cert = "FIXED_CLIENT_CERT",
+                      .app_state_folder = "fixed_client",
+                      .settings = wolf::config::ClientSettings{.run_uid = 1000,
+                                                               .run_gid = 1000,
+                                                               .mouse_acceleration = 1.0f,
+                                                               .v_scroll_acceleration = 1.0f,
+                                                               .h_scroll_acceleration = 1.0f}};
 }
 
 /**
@@ -61,17 +57,13 @@ inline std::optional<PairedClient> get_client_via_ssl(const Config &cfg, x509::x
  */
 inline std::optional<PairedClient> get_client_via_ssl(const Config &cfg, const std::string &client_cert) {
   // 总是返回固定的客户端
-  return PairedClient{
-      .client_cert = "FIXED_CLIENT_CERT",
-      .app_state_folder = "fixed_client",
-      .settings = wolf::config::ClientSettings{
-          .run_uid = 1000,
-          .run_gid = 1000,
-          .mouse_acceleration = 1.0f,
-          .v_scroll_acceleration = 1.0f,
-          .h_scroll_acceleration = 1.0f
-      }
-  };
+  return PairedClient{.client_cert = "FIXED_CLIENT_CERT",
+                      .app_state_folder = "fixed_client",
+                      .settings = wolf::config::ClientSettings{.run_uid = 1000,
+                                                               .run_gid = 1000,
+                                                               .mouse_acceleration = 1.0f,
+                                                               .v_scroll_acceleration = 1.0f,
+                                                               .h_scroll_acceleration = 1.0f}};
 }
 
 /**
