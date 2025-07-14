@@ -482,18 +482,6 @@ void run() {
   auto p_cert_file = utils::get_env("WOLF_PRIVATE_CERT_FILE", "cert.pem");
   auto local_state = initialize(config_file, p_key_file, p_cert_file);
 
-  // HTTP APIs
-  auto http_thread = std::thread([local_state]() {
-    HttpServer server = HttpServer();
-    HTTPServers::startServer(&server, local_state, state::get_port(state::HTTP_PORT));
-  });
-
-  // HTTPS APIs
-  std::thread([local_state, p_key_file, p_cert_file]() {
-    HttpsServer server = HttpsServer(p_cert_file, p_key_file);
-    HTTPServers::startServer(&server, local_state, state::get_port(state::HTTPS_PORT));
-  }).detach();
-
   // RTSP
   std::thread([sessions = local_state->running_sessions]() {
     rtsp::run_server(state::get_port(state::RTSP_SETUP_PORT), sessions);
@@ -512,7 +500,28 @@ void run() {
   // Wolf API server
   std::thread([local_state]() { wolf::api::start_server(local_state); }).detach();
 
-  // mDNS
+  // 等待 audio_server 连接成功
+  logs::log(logs::info, "等待 audio_server 连接...");
+  auto audio_server = setup_audio_server(runtime_dir);
+  if (audio_server && audio_server->server) {
+    logs::log(logs::info, "audio_server 连接成功，启动 HTTP 和 HTTPS 服务器");
+  } else {
+    logs::log(logs::warning, "audio_server 连接失败，但仍将启动 HTTP 和 HTTPS 服务器");
+  }
+
+  // HTTP APIs - 在 audio_server 连接后启动
+  auto http_thread = std::thread([local_state]() {
+    HttpServer server = HttpServer();
+    HTTPServers::startServer(&server, local_state, state::get_port(state::HTTP_PORT));
+  });
+
+  // HTTPS APIs - 在 audio_server 连接后启动
+  std::thread([local_state, p_key_file, p_cert_file]() {
+    HttpsServer server = HttpsServer(p_cert_file, p_key_file);
+    HTTPServers::startServer(&server, local_state, state::get_port(state::HTTPS_PORT));
+  }).detach();
+
+  // mDNS - 在 audio_server 连接后启动
   std::thread([hostname = local_state->config->hostname]() {
     logs::log(logs::info, "Starting mDNS service");
     try {
@@ -534,7 +543,6 @@ void run() {
     }
   }).detach();
 
-  auto audio_server = setup_audio_server(runtime_dir);
   auto sess_handlers = setup_sessions_handlers(local_state, runtime_dir, audio_server);
 
   http_thread.join(); // Let's park the main thread over here

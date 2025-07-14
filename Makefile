@@ -1,4 +1,4 @@
-TAG := v0.0.2-static
+TAG := v0.0.3-static
 
 build:
 	TAG=$(TAG) bash -x ./docker-build.sh
