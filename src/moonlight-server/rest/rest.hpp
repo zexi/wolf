@@ -46,5 +46,7 @@ namespace HTTPServers {
 
 void startServer(HttpServer *server, const immer::box<state::AppState> state, int port);
 
+void startServer2(HttpsServer *server, const immer::box<state::AppState> state, int port);
+
 void startServer(HttpsServer *server, const immer::box<state::AppState> state, int port);
 } // namespace HTTPServers

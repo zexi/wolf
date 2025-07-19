@@ -211,10 +211,11 @@ XMLResult pair_phase4(state::PairCache &client_cache, const std::string &client_
   return {SimpleWeb::StatusCode::success_ok, xml};
 }
 
-void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Response> &response,
-          const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Request> &request,
+template <class T>
+void pair(const std::shared_ptr<typename SimpleWeb::Server<T>::Response> &response,
+          const std::shared_ptr<typename SimpleWeb::Server<T>::Request> &request,
           const immer::box<state::AppState> &state) {
-  log_req<SimpleWeb::HTTP>(request);
+  log_req<T>(request);
 
   SimpleWeb::CaseInsensitiveMultimap headers = request->parse_query_string();
   auto salt = get_header(headers, "salt");
@@ -223,7 +224,7 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
   auto client_ip = request->remote_endpoint().address().to_string();
 
   if (!client_id) {
-    send_xml<SimpleWeb::HTTP>(response,
+    send_xml<T>(response,
                               SimpleWeb::StatusCode::client_error_bad_request,
                               fail_pair("Received pair request without uniqueid, stopping."));
     return;
@@ -237,20 +238,20 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
     logs::log(logs::info, "PHASE 1 Pairing with client: {}", client_id.value());
     auto future_result = pair_phase1(state,
                                      client_ip,
-                                     get_host_external_ip<SimpleWeb::HTTP>(request, state),
+                                     get_host_external_ip<T>(request, state),
                                      client_cert_str.value(),
                                      salt.value(),
                                      cache_key);
     future_result->get_future().then([response](boost::future<XMLResult> result) {
       auto [status, xml] = result.get();
-      send_xml<SimpleWeb::HTTP>(response, status, xml);
+      send_xml<T>(response, status, xml);
     });
     return;
   }
 
   auto client_cache_it = state->pairing_cache->load()->find(cache_key);
   if (client_cache_it == nullptr) {
-    send_xml<SimpleWeb::HTTP>(
+    send_xml<T>(
         response,
         SimpleWeb::StatusCode::client_error_bad_request,
         fail_pair(fmt::format("Unable to find {} {} in the pairing cache", client_id.value(), client_ip)));
@@ -263,7 +264,7 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
   if (client_challenge) {
     logs::log(logs::info, "PHASE 2 Pairing with client: {}", client_id.value());
     auto [status, xml] = pair_phase2(state, client_cache, client_challenge.value(), cache_key);
-    send_xml<SimpleWeb::HTTP>(response, status, xml);
+    send_xml<T>(response, status, xml);
     if (status != SimpleWeb::StatusCode::success_ok) {
       remove_pair_session(state, cache_key); // security measure, remove the session if the pairing failed
     }
@@ -275,7 +276,7 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
   if (server_challenge && client_cache.server_secret) {
     logs::log(logs::info, "PHASE 3 Pairing with client: {}", client_id.value());
     auto [status, xml] = pair_phase3(state, client_cache, server_challenge.value(), cache_key);
-    send_xml<SimpleWeb::HTTP>(response, status, xml);
+    send_xml<T>(response, status, xml);
     if (status != SimpleWeb::StatusCode::success_ok) {
       remove_pair_session(state, cache_key); // security measure, remove the session if the pairing failed
     }
@@ -287,7 +288,7 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTP>::Res
   if (client_secret && client_cache.server_challenge && client_cache.client_hash) {
     logs::log(logs::info, "PHASE 4 Pairing with client: {}", client_id.value());
     auto [status, xml] = pair_phase4(client_cache, client_secret.value());
-    send_xml<SimpleWeb::HTTP>(response, status, xml);
+    send_xml<T>(response, status, xml);
 
     if (status == SimpleWeb::StatusCode::success_ok) {
       state::pair(state->config,
