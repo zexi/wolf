@@ -99,7 +99,7 @@ void startServer2(HttpsServer *server, const immer::box<state::AppState> state, 
  */
 void startServer(HttpServer *server, const immer::box<state::AppState> state, int port) {
   server->config.port = port;
-  server->config.address = "0.0.0.0";
+  server->config.address = "127.0.0.1";
   server->default_resource["GET"] = endpoints::not_found<SimpleWeb::HTTP>;
   server->default_resource["POST"] = endpoints::not_found<SimpleWeb::HTTP>;
 

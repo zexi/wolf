@@ -1,4 +1,4 @@
-TAG := v0.0.3-static
+TAG := v0.0.3-https.1
 
 build:
 	TAG=$(TAG) bash -x ./docker-build.sh
