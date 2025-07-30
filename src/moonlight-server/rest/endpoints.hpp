@@ -225,8 +225,8 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<T>::Response> &respon
 
   if (!client_id) {
     send_xml<T>(response,
-                              SimpleWeb::StatusCode::client_error_bad_request,
-                              fail_pair("Received pair request without uniqueid, stopping."));
+                SimpleWeb::StatusCode::client_error_bad_request,
+                fail_pair("Received pair request without uniqueid, stopping."));
     return;
   }
 
@@ -251,10 +251,9 @@ void pair(const std::shared_ptr<typename SimpleWeb::Server<T>::Response> &respon
 
   auto client_cache_it = state->pairing_cache->load()->find(cache_key);
   if (client_cache_it == nullptr) {
-    send_xml<T>(
-        response,
-        SimpleWeb::StatusCode::client_error_bad_request,
-        fail_pair(fmt::format("Unable to find {} {} in the pairing cache", client_id.value(), client_ip)));
+    send_xml<T>(response,
+                SimpleWeb::StatusCode::client_error_bad_request,
+                fail_pair(fmt::format("Unable to find {} {} in the pairing cache", client_id.value(), client_ip)));
     return;
   }
   auto client_cache = *client_cache_it;

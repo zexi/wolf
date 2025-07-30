@@ -520,7 +520,7 @@ void run() {
   // 127.0.0.1 监听
   std::thread([local_state, p_key_file, p_cert_file]() {
     HttpServer server = HttpServer();
-    HTTPServers::startServer(&server, local_state, state::get_port(state::HTTP_PORT)-1);
+    HTTPServers::startServer(&server, local_state, state::get_port(state::HTTP_PORT) - 1);
   }).detach();
 
   // HTTPS APIs - 在 audio_server 连接后启动

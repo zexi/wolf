@@ -29,7 +29,9 @@ void startServer2(HttpsServer *server, const immer::box<state::AppState> state, 
     endpoints::serverinfo<SimpleWeb::HTTPS>(resp, req, {}, state);
   };
 
-  server->resource["^/pair$"]["GET"] = [&state](auto resp, auto req) { endpoints::pair<SimpleWeb::HTTPS>(resp, req, state); };
+  server->resource["^/pair$"]["GET"] = [&state](auto resp, auto req) {
+    endpoints::pair<SimpleWeb::HTTPS>(resp, req, state);
+  };
 
   auto pairing_atom = state->pairing_atom;
 
@@ -107,7 +109,9 @@ void startServer(HttpServer *server, const immer::box<state::AppState> state, in
     endpoints::serverinfo<SimpleWeb::HTTP>(resp, req, {}, state);
   };
 
-  server->resource["^/pair$"]["GET"] = [&state](auto resp, auto req) { endpoints::pair<SimpleWeb::HTTP>(resp, req, state); };
+  server->resource["^/pair$"]["GET"] = [&state](auto resp, auto req) {
+    endpoints::pair<SimpleWeb::HTTP>(resp, req, state);
+  };
 
   auto pairing_atom = state->pairing_atom;
 
