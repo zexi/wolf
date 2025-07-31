@@ -1,11 +1,11 @@
 #include <control/control.hpp>
+#include <cstdlib>
 #include <gstreamer-1.0/gst/app/gstappsink.h>
 #include <gstreamer-1.0/gst/app/gstappsrc.h>
 #include <immer/array.hpp>
 #include <immer/box.hpp>
 #include <memory>
 #include <streaming/streaming.hpp>
-#include <cstdlib>
 
 namespace streaming {
 
@@ -13,7 +13,7 @@ using namespace wolf::core::gstreamer;
 using namespace wolf::core;
 
 std::string get_device_enc() {
-  const char* nvidia_index = std::getenv("WOLF_NVIDIA_INDEX");
+  const char *nvidia_index = std::getenv("WOLF_NVIDIA_INDEX");
   if (nvidia_index && std::string(nvidia_index) != "0") {
     return fmt::format("nvh265device{}enc", nvidia_index);
   }
