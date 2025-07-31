@@ -101,7 +101,7 @@ colorimetry={color_space}, pixel-aspect-ratio=1/1\
 plugin_name = "nvcodec"
 check_elements = ["nvh265enc", "cudaconvertscale", "cudaupload"]
 encoder_pipeline = """
-nvh265enc gop-size=-1 bitrate={bitrate} aud=false rc-mode=cbr zerolatency=true preset=p1 tune=ultra-low-latency multi-pass=two-pass-quarter !
+{deviceenc} gop-size=-1 bitrate={bitrate} aud=false rc-mode=cbr zerolatency=true preset=p1 tune=ultra-low-latency multi-pass=two-pass-quarter !
 h265parse !
 video/x-h265, profile=main, stream-format=byte-stream\
 """
