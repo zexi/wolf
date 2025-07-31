@@ -1,4 +1,5 @@
 #include <control/control.hpp>
+#include <cstdlib>
 #include <gstreamer-1.0/gst/app/gstappsink.h>
 #include <gstreamer-1.0/gst/app/gstappsrc.h>
 #include <immer/array.hpp>
@@ -10,6 +11,14 @@ namespace streaming {
 
 using namespace wolf::core::gstreamer;
 using namespace wolf::core;
+
+std::string get_device_enc() {
+  const char *nvidia_index = std::getenv("WOLF_NVIDIA_INDEX");
+  if (nvidia_index && std::string(nvidia_index) != "0") {
+    return fmt::format("nvh265device{}enc", nvidia_index);
+  }
+  return "nvh265enc"; // 默认值
+}
 
 struct GstBusData {
   std::shared_ptr<boost::promise<WaylandDisplayReady>> on_ready;
@@ -219,6 +228,7 @@ void start_streaming_video(immer::box<events::VideoSession> video_session,
   auto [color_range, color_space] = get_color_params(video_session);
 
   auto pipeline = fmt::format(fmt::runtime(video_session->gst_pipeline),
+                              fmt::arg("deviceenc", get_device_enc()),
                               fmt::arg("session_id", video_session->session_id),
                               fmt::arg("width", video_session->display_mode.width),
                               fmt::arg("height", video_session->display_mode.height),
