@@ -72,7 +72,8 @@ void RunHook::run(std::size_t session_id,
   auto udev_base_path = std::filesystem::path("/run") / "udev";
   auto hw_db_path = udev_base_path / "data";
   auto fake_udev_cli_path = std::string(utils::get_env("WOLF_DOCKER_FAKE_UDEV_PATH", ""));
-  bool use_fake_udev = !fake_udev_cli_path.empty() || std::filesystem::exists(fake_udev_cli_path);
+  // bool use_fake_udev = !fake_udev_cli_path.empty() || std::filesystem::exists(fake_udev_cli_path);
+  auto use_fake_udev = true;
   if (use_fake_udev) {
     // logs::log(logs::info, "[HOOK] Using fake-udev, creating {}", hw_db_path.string());
     // std::filesystem::create_directories(hw_db_path);

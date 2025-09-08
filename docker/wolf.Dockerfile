@@ -4,6 +4,8 @@ FROM $BASE_IMAGE AS wolf-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/ubuntu.sources
+
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \
     curl \
@@ -73,6 +75,8 @@ RUN --mount=type=cache,target=/cache/ccache \
 FROM $BASE_IMAGE AS runner
 ENV DEBIAN_FRONTEND=noninteractive
 
+RUN sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
+RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/ubuntu.sources
 # Wolf runtime dependencies
 RUN apt-get update -y && \
     apt-get install -y --no-install-recommends \

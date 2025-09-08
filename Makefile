@@ -1,4 +1,6 @@
-TAG := v0.0.3-https.1
+TAG := nv-index-static.1
+
+.PHONY: build
 
 build:
 	TAG=$(TAG) bash -x ./docker-build.sh
