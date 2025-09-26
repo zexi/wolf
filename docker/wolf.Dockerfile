@@ -45,7 +45,7 @@ RUN <<_GST_WAYLAND_DISPLAY
 
     git clone -b test-stable https://github.com/zexi/gst-wayland-display
     cd gst-wayland-display
-    git checkout 754749a4c9e3002345e2161ac19201ec36cbbcaa
+    git checkout 412d26ae19cc4e729fda36ee0fb6a2dc38fec0ef
     cargo install cargo-c
     cargo cinstall -p gst-plugin-wayland-display --prefix=/usr/local/lib/x86_64-linux-gnu/ --libdir=/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0
 _GST_WAYLAND_DISPLAY
