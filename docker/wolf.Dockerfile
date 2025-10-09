@@ -1,4 +1,5 @@
 ARG BASE_IMAGE=ghcr.io/games-on-whales/gstreamer:1.26.2
+#ARG BASE_IMAGE=registry.cn-beijing.aliyuncs.com/zexi/gstreamer:1.26.2-0930.0
 ########################################################
 FROM $BASE_IMAGE AS wolf-builder
 
@@ -40,9 +41,9 @@ RUN <<_GST_WAYLAND_DISPLAY
     #!/bin/bash
     set -e
 
-    git clone https://github.com/games-on-whales/gst-wayland-display
+    git clone https://github.com/zexi/gst-wayland-display
     cd gst-wayland-display
-    git checkout 412d26ae19cc4e729fda36ee0fb6a2dc38fec0ef
+    git checkout 1c91821ebc6a02724009db88629d0b77049320e1
     cargo install cargo-c
     cargo cinstall -p gst-plugin-wayland-display --prefix=/usr/local/lib/x86_64-linux-gnu/ --libdir=/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0
 _GST_WAYLAND_DISPLAY
