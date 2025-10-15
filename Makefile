@@ -1,4 +1,4 @@
-TAG := nv-index-0926.0
+TAG := static-1010.0
 
 .PHONY: build
 
