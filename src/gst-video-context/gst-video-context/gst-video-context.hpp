@@ -1,7 +1,9 @@
 #pragma once
 
+#include <filesystem>
 #include <gst/gst.h>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace gst_video_context {
@@ -24,5 +26,11 @@ using gst_context_ptr = std::shared_ptr<GstVideoContext>;
 gst_context_ptr need_context_for_device(const std::string &device_path, GstMessage *msg);
 
 bool set_context(gst_context_ptr context, GstMessage *msg);
+
+/**
+ * Get CUDA device index from DRI render node path.
+ * Returns std::nullopt if the device is not a NVIDIA GPU or if the device index cannot be determined.
+ */
+std::optional<int> getCudaDeviceFromDri(const std::filesystem::path &driPath);
 
 } // namespace gst_video_context
