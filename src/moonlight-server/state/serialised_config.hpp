@@ -88,11 +88,6 @@ struct AppHook {
   std::string endpoint;
 };
 
-struct AppChildSession {
-  using Tag = rfl::Literal<"child_session">;
-  std::string parent_session_id;
-};
-
 struct BaseAppVideoOverride {
   std::optional<std::string> source;
   std::optional<std::string> sink;
@@ -119,16 +114,25 @@ struct BaseApp {
   std::optional<BaseAppAudioOverride> audio;
   std::optional<bool> start_virtual_compositor;
   std::optional<bool> start_audio_server;
-  rfl::TaggedUnion<"type", AppCMD, AppDocker, AppHook, AppChildSession> runner =
+  rfl::TaggedUnion<"type", AppCMD, AppDocker, AppHook> runner =
       AppCMD{}; // We have to provide a default or rfl::DefaultIfMissing will fail
+};
+
+struct Profile {
+  std::string id;
+  std::optional<std::string> name;
+  std::optional<std::string> icon_png_path;
+  std::optional<std::vector<short>> pin;
+
+  std::vector<BaseApp> apps;
 };
 
 struct WolfConfig {
   std::string hostname;
   std::string uuid;
-  int config_version = 4;
+  int config_version = 5;
   std::vector<PairedClient> paired_clients;
-  std::vector<BaseApp> apps;
+  std::vector<Profile> profiles;
   GstreamerSettings gstreamer;
 };
 

@@ -8,7 +8,6 @@
 #include <crypto/crypto.hpp>
 #include <events/events.hpp>
 #include <helpers/logger.hpp>
-#include <runners/child_session.hpp>
 #include <runners/docker.hpp>
 #include <runners/hook.hpp>
 #include <runners/process.hpp>
@@ -30,11 +29,13 @@ Config load_or_default(const std::string &source,
 
 /**
  * Side effect, will atomically update the paired clients list in cfg
+ * and persist the new state to disk
  */
 void pair(const Config &cfg, const PairedClient &client);
 
 /**
  * Side effect, will atomically remove the client from the list of paired clients
+ * and persist the new state to disk
  */
 void unpair(const Config &cfg, const PairedClient &client);
 
@@ -94,14 +95,32 @@ inline std::optional<PairedClient> get_client_by_id(const Config &cfg, const std
 }
 
 /**
- * Return the app with the given app_id (if it exists)
+ * Returns the profile that represent apps shown in the Moonlight UI
  */
-inline std::optional<immer::box<events::App>> get_app_by_id(const Config &cfg, std::string_view app_id) {
-  auto apps = cfg.apps->load();
-  auto search_result =
-      std::find_if(apps->begin(), apps->end(), [&app_id](const events::App &app) { return app.base.id == app_id; });
+inline std::optional<immer::box<events::Profile>> get_moonlight_profile(const Config &cfg) {
+  ProfilesList profiles = cfg.profiles->load();
+  auto profile = std::find_if(profiles.begin(), profiles.end(), [](const immer::box<events::Profile> &profile) {
+    return profile->id == events::MOONLIGHT_PROFILE_ID;
+  });
 
-  if (search_result != apps->end())
+  if (profile != profiles.end())
+    return *profile;
+  else
+    return std::nullopt;
+}
+
+/**
+ * Returns the app with the given app_id (if it exists)
+ */
+inline std::optional<immer::box<events::App>> get_moonlight_app_by_id(const Config &cfg, std::string_view app_id) {
+  auto moonlight_profile = get_moonlight_profile(cfg);
+  if (!moonlight_profile)
+    return std::nullopt;
+  immer::vector<immer::box<events::App>> apps = moonlight_profile.value()->apps->load();
+  auto search_result =
+      std::find_if(apps.begin(), apps.end(), [&app_id](const events::App &app) { return app.base.id == app_id; });
+
+  if (search_result != apps.end())
     return {*search_result};
   else
     return std::nullopt;
@@ -117,24 +136,14 @@ inline std::string gen_uuid() {
   return boost::lexical_cast<std::string>(uuid);
 }
 
-static std::shared_ptr<events::Runner>
-get_runner(const rfl::TaggedUnion<"type", AppCMD, AppDocker, AppHook, AppChildSession> &runner,
-           const std::shared_ptr<events::EventBusType> &ev_bus,
-           state::SessionsAtoms running_sessions) {
+static std::shared_ptr<events::Runner> get_runner(const events::RunnerTypes &runner,
+                                                  const std::shared_ptr<events::EventBusType> &ev_bus) {
   if (rfl::holds_alternative<AppCMD>(runner.variant())) {
     auto run_cmd = rfl::get<AppCMD>(runner.variant()).run_cmd;
     return std::make_shared<process::RunProcess>(ev_bus, run_cmd);
   } else if (rfl::holds_alternative<AppDocker>(runner.variant())) {
     return std::make_shared<docker::RunDocker>(
         docker::RunDocker::from_cfg(ev_bus, rfl::get<AppDocker>(runner.variant())));
-  } else if (rfl::holds_alternative<AppChildSession>(runner.variant())) {
-    auto session_id = rfl::get<AppChildSession>(runner.variant()).parent_session_id;
-    return std::make_shared<coop::RunChildSession>(std::stoul(session_id), ev_bus, running_sessions);
-  } else if (rfl::holds_alternative<AppHook>(runner.variant())) {
-    auto cfg = rfl::get<AppHook>(runner.variant());
-    auto env = cfg.env;
-    auto endpoint = cfg.endpoint;
-    return std::make_shared<hook::RunHook>(ev_bus, env, endpoint);
   } else {
     logs::log(logs::error, "Found runner of unknown type");
     throw std::runtime_error("Unknown runner type");
@@ -162,4 +171,10 @@ std::optional<PairedClient> get_client_by_id(const Config &cfg, const std::strin
  * Side effects: will save back the configuration to disk
  */
 void update_client_settings(const Config &cfg, std::size_t client_id, const PairedClient &updated_client);
+
+/**
+ * Replaces the currently loaded profiles
+ * Side effects: will save back the configuration to disk
+ */
+void update_profiles(const Config &cfg, const ProfilesList &profiles);
 } // namespace state
