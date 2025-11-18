@@ -144,6 +144,9 @@ static std::shared_ptr<events::Runner> get_runner(const events::RunnerTypes &run
   } else if (rfl::holds_alternative<AppDocker>(runner.variant())) {
     return std::make_shared<docker::RunDocker>(
         docker::RunDocker::from_cfg(ev_bus, rfl::get<AppDocker>(runner.variant())));
+  } else if (rfl::holds_alternative<AppHook>(runner.variant())) {
+    auto hook_cfg = rfl::get<AppHook>(runner.variant());
+    return std::make_shared<hook::RunHook>(ev_bus, hook_cfg.env, hook_cfg.endpoint);
   } else {
     logs::log(logs::error, "Found runner of unknown type");
     throw std::runtime_error("Unknown runner type");

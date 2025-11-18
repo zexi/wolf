@@ -43,7 +43,7 @@ struct UnplugDeviceEvent {
 };
 
 using devices_atom_queue = TSQueue<immer::box<events::PlugDeviceEvent>>;
-using RunnerTypes = rfl::TaggedUnion<"type", wolf::config::AppCMD, wolf::config::AppDocker>;
+using RunnerTypes = rfl::TaggedUnion<"type", wolf::config::AppCMD, wolf::config::AppDocker, wolf::config::AppHook>;
 
 struct Runner {
   virtual ~Runner() = default;

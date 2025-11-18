@@ -221,7 +221,7 @@ void run() {
 
   // 等待 audio_server 连接成功
   logs::log(logs::info, "等待 audio_server 连接...");
-  auto audio_server = setup_audio_server(runtime_dir);
+  auto audio_server = setup_audio_server(local_state->host->host_xdg_runtime_dir, runtime_dir);
   if (audio_server && audio_server->server) {
     logs::log(logs::info, "audio_server 连接成功，启动 HTTP 和 HTTPS 服务器");
   } else {
@@ -260,17 +260,21 @@ void run() {
       mdns.setServiceName("_nvstream._tcp.local.");
       mdns.setServiceHostname(hostname);
       mdns.setServicePort(state::get_port(state::HTTP_PORT));
-      auto override_ip = utils::get_env("WOLF_EXTERNAL_IP");
-      auto ipaddr = addr_ston(override_ip);
-      logs::log(logs::info, "=======set mdns addr: {}", addr_ntos(ipaddr));
-      mdns.setServiceAddressIPV4(ipaddr);
+      if (auto override_ip = utils::get_env("WOLF_EXTERNAL_IP")) {
+        struct in_addr addr;
+        if (inet_aton(override_ip, &addr) != 0) {
+          logs::log(logs::info, "=======set mdns addr: {}", override_ip);
+          mdns.setServiceAddressIPV4(addr.s_addr);
+        } else {
+          logs::log(logs::warning, "Invalid IP address format: {}", override_ip);
+        }
+      }
       mdns.startService(false);
     } catch (const std::exception &e) {
       logs::log(logs::error, "mDNS error: {}", e.what());
     }
   }).detach();
 
-  auto audio_server = setup_audio_server(local_state->host->host_xdg_runtime_dir, runtime_dir);
   // Setup event handlers for Moonlight related events (Start/Stop stream, hotplug, etc)
   auto moonlight_sess_handlers = sessions::setup_moonlight_handlers(local_state, runtime_dir, audio_server);
   // Setup event handlers for player Lobbies

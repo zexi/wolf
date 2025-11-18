@@ -117,27 +117,33 @@ std::optional<GstEncoder> get_encoder(std::string_view tech,
       }
     }
     if (encoder_type(*encoder) == NVIDIA) {
-      // Get CUDA device ID from render node
-      auto cuda_device_id = gst_video_context::getCudaDeviceFromDri(std::string(encoder_node));
-      if (cuda_device_id.has_value() && *cuda_device_id != 0) {
-        auto possible_nvidia_plugin = fmt::format("nv{}device{}enc", tech, *cuda_device_id);
-        auto possible_encoder = GstEncoder{.plugin_name = encoder->plugin_name,
-                                           .check_elements = {possible_nvidia_plugin, "cudaconvertscale", "cudaupload"},
-                                           .video_params = encoder->video_params,
-                                           .video_params_zero_copy = encoder->video_params_zero_copy,
-                                           .encoder_pipeline = encoder->encoder_pipeline};
-        logs::log(logs::debug, "Checking if {} is available", possible_nvidia_plugin);
-        if (is_available(vendor, possible_encoder)) {
-          possible_encoder.encoder_pipeline = std::regex_replace(possible_encoder.encoder_pipeline,
-                                                                 std::regex(fmt::format("nv{}enc", tech)),
-                                                                 possible_nvidia_plugin);
-          logs::log(logs::info,
-                    "Detected multiple NVIDIA devices, using {} encoder (CUDA device ID: {})",
-                    possible_nvidia_plugin,
-                    *cuda_device_id);
-          return possible_encoder;
-        }
+      logs::log(logs::info, "NVIDIA encoder detected, can use CUDA_VISIBLE_DEVICES env variable to select the device");
+      if (auto cuda_visible = utils::get_env("CUDA_VISIBLE_DEVICES")) {
+        logs::log(logs::info, "CUDA_VISIBLE_DEVICES={}", cuda_visible);
+      } else {
+        logs::log(logs::info, "CUDA_VISIBLE_DEVICES 未设置，将默认使用第一张可见的 NVIDIA GPU");
       }
+      // // Get CUDA device ID from render node
+      // auto cuda_device_id = gst_video_context::getCudaDeviceFromDri(std::string(encoder_node));
+      // if (cuda_device_id.has_value() && *cuda_device_id != 0) {
+      //   auto possible_nvidia_plugin = fmt::format("nv{}device{}enc", tech, *cuda_device_id);
+      //   auto possible_encoder = GstEncoder{.plugin_name = encoder->plugin_name,
+      //                                      .check_elements = {possible_nvidia_plugin, "cudaconvertscale", "cudaupload"},
+      //                                      .video_params = encoder->video_params,
+      //                                      .video_params_zero_copy = encoder->video_params_zero_copy,
+      //                                      .encoder_pipeline = encoder->encoder_pipeline};
+      //   logs::log(logs::debug, "Checking if {} is available", possible_nvidia_plugin);
+      //   if (is_available(vendor, possible_encoder)) {
+      //     possible_encoder.encoder_pipeline = std::regex_replace(possible_encoder.encoder_pipeline,
+      //                                                            std::regex(fmt::format("nv{}enc", tech)),
+      //                                                            possible_nvidia_plugin);
+      //     logs::log(logs::info,
+      //               "Detected multiple NVIDIA devices, using {} encoder (CUDA device ID: {})",
+      //               possible_nvidia_plugin,
+      //               *cuda_device_id);
+      //     return possible_encoder;
+      //   }
+      // }
     }
     logs::log(logs::info, "Using {} encoder: {}", tech, encoder->plugin_name);
     if (encoder_type(*encoder) == SOFTWARE) {

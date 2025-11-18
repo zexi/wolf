@@ -37,6 +37,13 @@ std::string get_status(std::string_view url) {
   return "UNKNOWN";
 }
 
+std::string format_response(const std::optional<std::pair<long, std::string>> &response) {
+  if (response) {
+    return fmt::format("{} - {}", response->first, response->second);
+  }
+  return "no response";
+}
+
 void create_udev_hw_files(std::string_view endpoint,
                           std::filesystem::path base_hw_db_path,
                           std::vector<std::pair<std::string, std::vector<std::string>>> udev_hw_db_entries) {
@@ -52,16 +59,16 @@ void create_udev_hw_files(std::string_view endpoint,
       logs::log(logs::info, "[HOOK] call write-hwdb {} hook: {} - {}", host_file_path, raw_msg->first, raw_msg->second);
     } else {
       logs::log(logs::error,
-                "[HOOK] call write-hwdb {} hook error: {} - {}",
+                "[HOOK] call write-hwdb {} hook error: {}",
                 host_file_path,
-                raw_msg->first,
-                raw_msg->second);
+                format_response(raw_msg));
     }
   }
 }
 
-void RunHook::run(std::size_t session_id,
+void RunHook::run(std::string_view session_id,
                   std::string_view app_state_folder,
+                  std::string_view host_xdg_runtime_dir,
                   std::shared_ptr<events::devices_atom_queue> plugged_devices_queue,
                   const immer::array<std::string> &virtual_inputs,
                   const immer::array<std::pair<std::string, std::string>> &paths,
@@ -119,13 +126,13 @@ void RunHook::run(std::size_t session_id,
   if (raw_msg && (raw_msg->first == 201)) {
     logs::log(logs::info, "[HOOK] call start hook: {} - {}", raw_msg->first, raw_msg->second);
   } else {
-    logs::log(logs::error, "[HOOK] call start hook error: {} - {}", raw_msg->first, raw_msg->second);
+    logs::log(logs::error, "[HOOK] call start hook error: {}", format_response(raw_msg));
     return;
   }
 
   auto terminate_handler = this->ev_bus->register_handler<immer::box<events::StopStreamEvent>>(
       [session_id, this](const immer::box<events::StopStreamEvent> &terminate_ev) {
-        if (terminate_ev->session_id == session_id) {
+        if (std::to_string(terminate_ev->session_id) == session_id) {
           // curl to stop
           logs::log(logs::info, "[HOOK] stop session {}", session_id);
           auto url = fmt::format("{}/stop", this->endpoint);
@@ -133,7 +140,7 @@ void RunHook::run(std::size_t session_id,
           if (raw_msg && (raw_msg->first == 202)) {
             logs::log(logs::info, "[HOOK] call start hook: {} - {}", raw_msg->first, raw_msg->second);
           } else {
-            logs::log(logs::error, "[HOOK] call start hook error: {} - {}", raw_msg->first, raw_msg->second);
+            logs::log(logs::error, "[HOOK] call start hook error: {}", format_response(raw_msg));
             return;
           }
         }
@@ -161,10 +168,9 @@ void RunHook::run(std::size_t session_id,
                       exec_msg->second);
           } else {
             logs::log(logs::error,
-                      "[HOOK] remove hwdb file {} error: {} - {}",
+                      "[HOOK] remove hwdb file {} error: {}",
                       hwdb_file.string(),
-                      exec_msg->first,
-                      exec_msg->second);
+                      format_response(exec_msg));
           }
         }
         for (auto udev_ev : ev->udev_events) {
@@ -189,17 +195,17 @@ void RunHook::run(std::size_t session_id,
                       exec_msg->second);
           } else {
             logs::log(logs::error,
-                      "[HOOK] call exec hook to remove udev event error: {} - {}",
-                      exec_msg->first,
-                      exec_msg->second);
+                      "[HOOK] call exec hook to remove udev event error: {}",
+                      format_response(exec_msg));
           }
         }
       });
 
+  std::string session_id_str(session_id);
   do {
     // Plug all devices that are waiting in the queue
     while (auto device_ev = plugged_devices_queue->pop(50ms)) {
-      if (device_ev->get().session_id != session_id) {
+      if (device_ev->get().session_id != session_id_str) {
         continue;
       }
       if (use_fake_udev) {
@@ -229,7 +235,7 @@ void RunHook::run(std::size_t session_id,
         if (exec_msg && (exec_msg->first == 200)) {
           logs::log(logs::info, "[HOOK] call exec hook: {} - {}", exec_msg->first, exec_msg->second);
         } else {
-          logs::log(logs::error, "[HOOK] call exec hook error: {} - {}", exec_msg->first, exec_msg->second);
+          logs::log(logs::error, "[HOOK] call exec hook error: {}", format_response(exec_msg));
         }
       }
     }

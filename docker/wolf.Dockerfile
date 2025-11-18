@@ -44,7 +44,7 @@ RUN <<_GST_WAYLAND_DISPLAY
     #!/bin/bash
     set -e
 
-    git clone -b test-stable https://github.com/zexi/gst-wayland-display
+    git clone https://github.com/games-on-whales/gst-wayland-display
     cd gst-wayland-display
     git checkout f31e506
     cargo install cargo-c

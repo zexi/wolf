@@ -1,40 +1,50 @@
 R"for_c++_include(
 # The version of this config file
-config_version = 5
+config_version = 6
 # A list of paired clients that will be allowed to stream
 paired_clients = []
 
 ######################
-# Apps, the list of apps that will be shown in Moonlight
+# Profiles: a list of different profiles, each with a list of apps
+######################
+# The default profile, this is what is going to be showed in Moonlight clients
+[[profiles]]
+id = "moonlight-profile-id"
 
-[[apps]]
+[[profiles.apps]]
 start_virtual_compositor = true
 title = 'Steam'
 
-    [apps.runner]
-    endpoint = 'http://127.0.0.1:8080/hook'
-    env = [ 'PROTON_LOG=1', 'RUN_SWAY=true', 'GOW_REQUIRED_DEVICES=/dev/input/* /dev/dri/* /dev/nvidia*' ]
-    name = 'WolfHook'
-    type = 'hook'
+[profiles.apps.runner]
+name = 'WolfHook'
+endpoint = 'http://127.0.0.1:8080/hook'
+env = [ 'PROTON_LOG=1', 'RUN_SWAY=true', 'GOW_REQUIRED_DEVICES=/dev/input/* /dev/dri/* /dev/nvidia*' ]
+type = 'hook'
 
-[[apps]]
+[[profiles.apps]]
 title = "Test ball"
+icon_png_path = "https://raw.githubusercontent.com/games-on-whales/wolf/refs/heads/wolf-ui/docs/images/test_ball_icon.png"
 start_virtual_compositor = false
 start_audio_server = false
 
-[apps.runner]
+[profiles.apps.runner]
 type = "process"
 run_cmd = "sh -c \"while :; do echo 'running...'; sleep 10; done\""
 
-[apps.video]
+[profiles.apps.video]
 source = """
 videotestsrc pattern=ball flip=true is-live=true !
 video/x-raw, framerate={fps}/1
 \
 """
 
-[apps.audio]
+[profiles.apps.audio]
 source = "audiotestsrc wave=ticks is-live=true"
+
+# An example profile that will be shown in our Wolf UI
+[[profiles]]
+id = "user"
+name = "User"
 
 ######################
 # Gstreamer: Video/Audio encoding pipelines and streaming settings
@@ -42,7 +52,7 @@ source = "audiotestsrc wave=ticks is-live=true"
 
 [gstreamer.video]
 
-default_source = 'interpipesrc listen-to={session_id}_video is-live=true stream-sync=restart-ts max-bytes=0 max-buffers=1 leaky-type=downstream'
+default_source = 'interpipesrc name=interpipesrc_{}_video listen-to={session_id}_video is-live=true stream-sync=restart-ts max-bytes=0 max-buffers=1 leaky-type=downstream'
 default_sink = """
 rtpmoonlightpay_video name=moonlight_pay \
 payload_size={payload_size} fec_percentage={fec_percentage} min_required_fec_packets={min_required_fec_packets} !
@@ -55,16 +65,15 @@ appsink sync=false name=wolf_udp_sink
 [gstreamer.video.defaults.nvcodec]
 video_params = """
 cudaupload !
-cudaconvertscale !
+cudaconvertscale add-borders=true !
 video/x-raw(memory:CUDAMemory), width={width}, height={height}, \
 chroma-site={color_range}, format=NV12, colorimetry={color_space}, pixel-aspect-ratio=1/1\
 """
 
 video_params_zero_copy = """
-glupload !
-glcolorconvert !
-video/x-raw(memory:GLMemory),format=NV12, width={width}, height={height}, chroma-site={color_range}, \
-colorimetry={color_space}, pixel-aspect-ratio=1/1\
+cudaupload !
+cudaconvertscale add-borders=true !
+video/x-raw(memory:CUDAMemory),format=NV12, width={width}, height={height}, pixel-aspect-ratio=1/1
 """
 
 [gstreamer.video.defaults.qsv]
@@ -75,22 +84,20 @@ colorimetry={color_space}, pixel-aspect-ratio=1/1\
 """
 
 video_params_zero_copy = """
-vapostproc !
-video/x-raw(memory:VAMemory),format=NV12, chroma-site={color_range},
-colorimetry={color_space}, pixel-aspect-ratio=1/1\
+vapostproc add-borders=true !
+video/x-raw(memory:VAMemory), format=NV12, width={width}, height={height}, pixel-aspect-ratio=1/1\
 """
 
 [gstreamer.video.defaults.va]
 video_params = """
-vapostproc !
+vapostproc add-borders=true !
 video/x-raw, chroma-site={color_range}, width={width}, height={height}, format=NV12,
 colorimetry={color_space}, pixel-aspect-ratio=1/1\
 """
 
 video_params_zero_copy = """
-vapostproc !
-video/x-raw(memory:VAMemory), format=NV12, chroma-site={color_range}, width={width}, height={height},
-colorimetry={color_space}, pixel-aspect-ratio=1/1\
+vapostproc add-borders=true !
+video/x-raw(memory:VAMemory), format=NV12, width={width}, height={height}, pixel-aspect-ratio=1/1\
 """
 
 ######################
@@ -101,7 +108,7 @@ colorimetry={color_space}, pixel-aspect-ratio=1/1\
 plugin_name = "nvcodec"
 check_elements = ["nvh265enc", "cudaconvertscale", "cudaupload"]
 encoder_pipeline = """
-{deviceenc} gop-size=-1 bitrate={bitrate} aud=false rc-mode=cbr zerolatency=true preset=p1 tune=ultra-low-latency multi-pass=two-pass-quarter !
+nvh265enc gop-size=-1 bitrate={bitrate} aud=false rc-mode=cbr zerolatency=true preset=p1 tune=ultra-low-latency multi-pass=two-pass-quarter !
 h265parse !
 video/x-h265, profile=main, stream-format=byte-stream\
 """
@@ -271,7 +278,7 @@ video/x-av1, stream-format=obu-stream, alignment=frame, profile=main\
 ###
 [gstreamer.audio]
 default_source = """
-interpipesrc listen-to={session_id}_audio is-live=true stream-sync=restart-ts max-bytes=0 max-buffers=3 block=false\
+interpipesrc name=interpipesrc_{}_audio listen-to={session_id}_audio is-live=true stream-sync=restart-ts max-bytes=0 max-buffers=3 block=false\
 """
 
 default_audio_params = "queue max-size-buffers=3 leaky=downstream ! audiorate ! audioconvert"
@@ -285,6 +292,4 @@ default_sink = """
 rtpmoonlightpay_audio name=moonlight_pay packet_duration={packet_duration} encrypt={encrypt} \
 aes_key="{aes_key}" aes_iv="{aes_iv}" !
 appsink name=wolf_udp_sink\
-"""
-
-)for_c++_include"
+""")for_c++_include"
