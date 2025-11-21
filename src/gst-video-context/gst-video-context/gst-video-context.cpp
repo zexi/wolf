@@ -161,6 +161,13 @@ cuda_context_ptr create_cuda_context(const std::string &device_path) {
   auto cuda_ctx = gst_cuda_context_new(device_id);
   if (cuda_ctx) {
     return std::shared_ptr<GstCudaContext>(cuda_ctx, gst_object_unref);
+  } else {
+    // try to create a context for the first GPU
+    cuda_ctx = gst_cuda_context_new(0);
+    if (cuda_ctx) {
+      logs::log(logs::warning, "Failed to create CUDA context for device: {}, using first GPU instead", device_path);
+      return std::shared_ptr<GstCudaContext>(cuda_ctx, gst_object_unref);
+    }
   }
   logs::log(logs::warning, "Failed to create CUDA context for device: {}", device_path);
   return nullptr;
