@@ -294,6 +294,10 @@ struct StopStreamEvent {
   std::string rtsp_fake_ip;
 };
 
+struct ClientWolfUIComboEvent {
+  std::size_t session_id;
+};
+
 struct SwitchStreamProducerEvents {
   std::size_t session_id;
   /**
@@ -334,6 +338,7 @@ using EventBusHandlers = dp::handler_registration<immer::box<PlugDeviceEvent>,
                                                   immer::box<PauseStreamEvent>,
                                                   immer::box<ResumeStreamEvent>,
                                                   immer::box<StopStreamEvent>,
+                                                  immer::box<ClientWolfUIComboEvent>,
                                                   immer::box<RTPVideoPingEvent>,
                                                   immer::box<RTPAudioPingEvent>,
                                                   immer::box<StartRunner>,
@@ -352,6 +357,7 @@ using EventBusType = dp::event_bus<immer::box<PlugDeviceEvent>,
                                    immer::box<PauseStreamEvent>,
                                    immer::box<ResumeStreamEvent>,
                                    immer::box<StopStreamEvent>,
+                                   immer::box<ClientWolfUIComboEvent>,
                                    immer::box<RTPVideoPingEvent>,
                                    immer::box<RTPAudioPingEvent>,
                                    immer::box<StartRunner>,
@@ -370,6 +376,7 @@ using EventsVariant = std::variant<immer::box<PlugDeviceEvent>,
                                    immer::box<PauseStreamEvent>,
                                    immer::box<ResumeStreamEvent>,
                                    immer::box<StopStreamEvent>,
+                                   immer::box<ClientWolfUIComboEvent>,
                                    immer::box<RTPVideoPingEvent>,
                                    immer::box<RTPAudioPingEvent>,
                                    immer::box<StartRunner>,
