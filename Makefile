@@ -1,4 +1,4 @@
-TAG := static-20251015.0
+TAG := static-20251124.0
 
 .PHONY: build
 
