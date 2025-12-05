@@ -345,49 +345,62 @@ void mouse_h_scroll(const MOUSE_HSCROLL_PACKET &pkt, events::StreamSession &sess
 void keyboard_key(const KEYBOARD_PACKET &pkt, events::StreamSession &session) {
   // moonlight always sets the high bit; not sure why but mask it off here
   short moonlight_key = (short)boost::endian::little_to_native(pkt.key_code) & (short)0x7fff;
-  int wolf_ui_combo_pressed = 0;
-  if (session.keyboard->has_value()) {
-    if (pkt.type == KEY_PRESS) {
-      // Press the virtual modifiers
-      if (pkt.modifiers & KEYBOARD_MODIFIERS::SHIFT && moonlight_key != M_SHIFT) {
-        wolf_ui_combo_pressed++;
-        std::visit([](auto &keyboard) { keyboard.press(M_SHIFT); }, session.keyboard->value());
-      }
-      if (pkt.modifiers & KEYBOARD_MODIFIERS::CTRL && moonlight_key != M_CTRL) {
-        wolf_ui_combo_pressed++;
-        std::visit([](auto &keyboard) { keyboard.press(M_CTRL); }, session.keyboard->value());
-      }
-      if (pkt.modifiers & KEYBOARD_MODIFIERS::ALT && moonlight_key != M_ALT) {
-        wolf_ui_combo_pressed++;
-        std::visit([](auto &keyboard) { keyboard.press(M_ALT); }, session.keyboard->value());
-      }
-      if (pkt.modifiers & KEYBOARD_MODIFIERS::META && moonlight_key != M_META)
-        std::visit([](auto &keyboard) { keyboard.press(M_META); }, session.keyboard->value());
 
-      // CTRL + ALT + SHIFT + W
-      if (wolf_ui_combo_pressed == 3 && moonlight_key == 0x57) {
-        session.event_bus->fire_event(immer::box<events::ClientWolfUIComboEvent>{
-            events::ClientWolfUIComboEvent{.session_id = session.session_id}});
-      }
-
-      // Press the actual key
-      std::visit([moonlight_key](auto &keyboard) { keyboard.press(moonlight_key); }, session.keyboard->value());
-
-      // Release the virtual modifiers
-      if (pkt.modifiers & KEYBOARD_MODIFIERS::SHIFT && moonlight_key != M_SHIFT)
-        std::visit([](auto &keyboard) { keyboard.release(M_SHIFT); }, session.keyboard->value());
-      if (pkt.modifiers & KEYBOARD_MODIFIERS::CTRL && moonlight_key != M_CTRL)
-        std::visit([](auto &keyboard) { keyboard.release(M_CTRL); }, session.keyboard->value());
-      if (pkt.modifiers & KEYBOARD_MODIFIERS::ALT && moonlight_key != M_ALT)
-        std::visit([](auto &keyboard) { keyboard.release(M_ALT); }, session.keyboard->value());
-      if (pkt.modifiers & KEYBOARD_MODIFIERS::META && moonlight_key != M_META)
-        std::visit([](auto &keyboard) { keyboard.release(M_META); }, session.keyboard->value());
-
-    } else {
-      std::visit([moonlight_key](auto &keyboard) { keyboard.release(moonlight_key); }, session.keyboard->value());
-    }
-  } else {
+  if (!session.keyboard->has_value()) {
     logs::log(logs::warning, "Received KEYBOARD_PACKET but no keyboard device is present");
+    return;
+  }
+
+  if (pkt.type == KEY_PRESS) {
+    int wolf_ui_combo_pressed = 0;
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::SHIFT && moonlight_key != M_SHIFT)
+      wolf_ui_combo_pressed++;
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::CTRL && moonlight_key != M_CTRL)
+      wolf_ui_combo_pressed++;
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::ALT && moonlight_key != M_ALT)
+      wolf_ui_combo_pressed++;
+
+    // CTRL + ALT + SHIFT + W
+    const bool wolf_ui_combo = (wolf_ui_combo_pressed == 3 && moonlight_key == 0x57);
+    if (wolf_ui_combo) {
+      // Ensure modifiers are released before we return to overlay
+      std::visit(
+          [](auto &keyboard) {
+            keyboard.release(M_SHIFT);
+            keyboard.release(M_CTRL);
+            keyboard.release(M_ALT);
+          },
+          session.keyboard->value());
+      session.event_bus->fire_event(
+          immer::box<events::ClientWolfUIComboEvent>{events::ClientWolfUIComboEvent{.session_id = session.session_id}});
+      return;
+    }
+
+    // Press the virtual modifiers
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::SHIFT && moonlight_key != M_SHIFT)
+      std::visit([](auto &keyboard) { keyboard.press(M_SHIFT); }, session.keyboard->value());
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::CTRL && moonlight_key != M_CTRL)
+      std::visit([](auto &keyboard) { keyboard.press(M_CTRL); }, session.keyboard->value());
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::ALT && moonlight_key != M_ALT)
+      std::visit([](auto &keyboard) { keyboard.press(M_ALT); }, session.keyboard->value());
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::META && moonlight_key != M_META)
+      std::visit([](auto &keyboard) { keyboard.press(M_META); }, session.keyboard->value());
+
+    // Press the actual key
+    std::visit([moonlight_key](auto &keyboard) { keyboard.press(moonlight_key); }, session.keyboard->value());
+
+    // Release the virtual modifiers
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::SHIFT && moonlight_key != M_SHIFT)
+      std::visit([](auto &keyboard) { keyboard.release(M_SHIFT); }, session.keyboard->value());
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::CTRL && moonlight_key != M_CTRL)
+      std::visit([](auto &keyboard) { keyboard.release(M_CTRL); }, session.keyboard->value());
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::ALT && moonlight_key != M_ALT)
+      std::visit([](auto &keyboard) { keyboard.release(M_ALT); }, session.keyboard->value());
+    if (pkt.modifiers & KEYBOARD_MODIFIERS::META && moonlight_key != M_META)
+      std::visit([](auto &keyboard) { keyboard.release(M_META); }, session.keyboard->value());
+
+  } else {
+    std::visit([moonlight_key](auto &keyboard) { keyboard.release(moonlight_key); }, session.keyboard->value());
   }
 }
 
@@ -594,22 +607,25 @@ void controller_multi(const CONTROLLER_MULTI_PACKET &pkt,
     // Old Moonlight doesn't support CONTROLLER_ARRIVAL, we create a default pad when it's first mentioned
     selected_pad = create_new_joypad(session, connected_client, pkt.controller_number, XBOX, ANALOG_TRIGGERS | RUMBLE);
   }
-  std::visit(
-      [pkt, session](inputtino::Joypad &pad) {
-        std::uint16_t bf = pkt.button_flags;
-        std::uint32_t bf2 = pkt.buttonFlags2;
-        auto pressed_buttons = bf | (bf2 << 16);
-        // Check for our special WOLF-UI combo (SELECT + RB)
-        if (pressed_buttons & inputtino::Joypad::BACK && pressed_buttons & inputtino::Joypad::RIGHT_BUTTON) {
-          session.event_bus->fire_event(immer::box<events::ClientWolfUIComboEvent>{
-              events::ClientWolfUIComboEvent{.session_id = session.session_id}});
-        }
-        pad.set_pressed_buttons(pressed_buttons);
-        pad.set_stick(inputtino::Joypad::LS, pkt.left_stick_x, pkt.left_stick_y);
-        pad.set_stick(inputtino::Joypad::RS, pkt.right_stick_x, pkt.right_stick_y);
-        pad.set_triggers(pkt.left_trigger, pkt.right_trigger);
-      },
-      *selected_pad);
+  if (selected_pad) {
+    std::visit(
+        [pkt, session](inputtino::Joypad &pad) {
+          std::uint16_t bf = pkt.button_flags;
+          std::uint32_t bf2 = pkt.buttonFlags2;
+          auto pressed_buttons = bf | (bf2 << 16);
+          // Check for our special WOLF-UI combo (START + UP + RB)
+          if (pressed_buttons & inputtino::Joypad::START && pressed_buttons & inputtino::Joypad::DPAD_UP &&
+              pressed_buttons & inputtino::Joypad::RIGHT_BUTTON) {
+            session.event_bus->fire_event(immer::box<events::ClientWolfUIComboEvent>{
+                events::ClientWolfUIComboEvent{.session_id = session.session_id}});
+          }
+          pad.set_pressed_buttons(pressed_buttons);
+          pad.set_stick(inputtino::Joypad::LS, pkt.left_stick_x, pkt.left_stick_y);
+          pad.set_stick(inputtino::Joypad::RS, pkt.right_stick_x, pkt.right_stick_y);
+          pad.set_triggers(pkt.left_trigger, pkt.right_trigger);
+        },
+        *selected_pad);
+  }
 }
 
 void controller_touch(const CONTROLLER_TOUCH_PACKET &pkt, events::StreamSession &session) {
