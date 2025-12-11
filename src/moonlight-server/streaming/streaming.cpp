@@ -214,12 +214,16 @@ send_buffer(std::shared_ptr<GstBuffer> buffer, std::shared_ptr<GstSample> sample
       logs::log(logs::warning, "UDP Socket is not open");
       udp_sink->socket->open(udp::v4());
     }
+    auto endpoint_str = fmt::format("{}:{}", udp_sink->client_endpoint->address().to_string(), udp_sink->client_endpoint->port());
+    logs::log(logs::trace, "[UDP] Sending {} bytes to {}", map.size, endpoint_str);
     udp_sink->socket->async_send_to(
         boost::asio::buffer(map.data, map.size),
         *udp_sink->client_endpoint,
-        [buffer, sample, map_ptr](const boost::system::error_code &error, std::size_t bytes_sent) {
+        [buffer, sample, map_ptr, endpoint_str](const boost::system::error_code &error, std::size_t bytes_sent) {
           if (error) {
             logs::log(logs::error, "Error sending UDP packet: {}", error.message());
+          } else {
+            logs::log(logs::trace, "[UDP] Sent {} bytes to {}", bytes_sent, endpoint_str);
           }
           gst_buffer_unmap(buffer.get(), map_ptr.get());
         });
@@ -296,6 +300,7 @@ void start_streaming_video(immer::box<events::VideoSession> video_session,
                               fmt::arg("color_range", color_range),
                               fmt::arg("host_port", video_session->port));
   logs::log(logs::debug, "Starting video pipeline: \n{}", pipeline);
+  logs::log(logs::info, "[STREAMING] Starting video stream for session {} to {}:{}", video_session->session_id, client_ip, client_port);
 
   std::shared_ptr<custom_sink::UDPSink> udp_sink = std::make_shared<custom_sink::UDPSink>(custom_sink::UDPSink{
       .socket = video_socket,

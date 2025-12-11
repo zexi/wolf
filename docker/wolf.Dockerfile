@@ -1,77 +1,47 @@
 #ARG BASE_IMAGE=ghcr.io/games-on-whales/gstreamer:1.26.2
 ARG BASE_IMAGE=registry.cn-beijing.aliyuncs.com/zexi/gstreamer:1.26.7
+# 使用预构建的 builder 基础镜像，包含 Rust 和所有构建依赖
+# 默认使用远程镜像，如果本地有构建可以使用 wolf-builder:latest
+ARG BUILDER_IMAGE=registry.cn-beijing.aliyuncs.com/zexi/wolf-builder:latest
 ########################################################
-FROM $BASE_IMAGE AS wolf-builder
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/ubuntu.sources
-
-RUN apt-get update -y && \
-    apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    ninja-build \
-    cmake \
-    pkg-config \
-    ccache \
-    git \
-    clang \
-    build-essential \
-    libboost-thread-dev libboost-locale-dev libboost-filesystem-dev libboost-log-dev libboost-stacktrace-dev libboost-container-dev \
-    libwayland-dev libwayland-server0 libinput-dev libxkbcommon-dev libgbm-dev \
-    libcurl4-openssl-dev \
-    libssl-dev \
-    libevdev-dev \
-    libpulse-dev \
-    libunwind-dev \
-    libudev-dev \
-    libdrm-dev \
-    libpci-dev \
-    libglib2.0-dev libegl-dev libgles-dev libopengl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-## Install Rust in order to build our custom compositor
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="$HOME/.cargo/bin:${PATH}"
-
-ARG RUST_VERSION=1.91.1
-ENV RUST_VERSION=$RUST_VERSION
-RUN rustup install $RUST_VERSION && rustup default $RUST_VERSION
-
-WORKDIR /tmp/
-RUN <<_GST_WAYLAND_DISPLAY
-    #!/bin/bash
-    set -e
-
-    git clone https://github.com/games-on-whales/gst-wayland-display
-    cd gst-wayland-display
-    git checkout 67b1183
-    cargo install cargo-c
-    cargo cinstall --features="cuda" --prefix=/usr/local/lib/x86_64-linux-gnu/ --libdir=/usr/local/lib/x86_64-linux-gnu/gstreamer-1.0
-_GST_WAYLAND_DISPLAY
+FROM $BUILDER_IMAGE AS wolf-builder
 
 COPY . /wolf/
 WORKDIR /wolf
 
 ENV CCACHE_DIR=/cache/ccache
 ENV CMAKE_BUILD_DIR=/cache/cmake-build
+# 清理旧的 CMake 缓存（源代码路径已改变），但保留 _deps 目录中的预下载依赖
 RUN --mount=type=cache,target=/cache/ccache \
+    <<_BUILD
+    #!/bin/bash
+    set -e
+    
+    # 如果构建目录存在，清理 CMake 缓存文件，但保留 _deps 目录
+    if [ -d "$CMAKE_BUILD_DIR" ]; then
+        echo "Cleaning CMake cache but preserving _deps directory..."
+        find "$CMAKE_BUILD_DIR" -mindepth 1 -maxdepth 1 ! -name "_deps" -exec rm -rf {} + || true
+    fi
+    
+    # 运行 CMake 配置和构建
     cmake -B$CMAKE_BUILD_DIR \
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DCMAKE_CXX_STANDARD=17 \
-    -DCMAKE_CXX_EXTENSIONS=OFF \
-    -DCMAKE_CXX_FLAGS="-Wno-missing-template-arg-list-after-template-kw" \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DBoost_USE_STATIC_LIBS=ON \
-    -DBUILD_FAKE_UDEV_CLI=ON \
-    -DBUILD_TESTING=OFF \
-    -G Ninja && \
-    ninja -C $CMAKE_BUILD_DIR wolf && \
-    ninja -C $CMAKE_BUILD_DIR fake-udev && \
-    # We have to copy out the built executables because this will only be available inside the buildkit cache
-    cp $CMAKE_BUILD_DIR/src/moonlight-server/wolf /wolf/wolf && \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_CXX_STANDARD=17 \
+        -DCMAKE_CXX_EXTENSIONS=OFF \
+        -DCMAKE_CXX_FLAGS="-Wno-missing-template-arg-list-after-template-kw" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBoost_USE_STATIC_LIBS=ON \
+        -DBUILD_FAKE_UDEV_CLI=ON \
+        -DBUILD_TESTING=OFF \
+        -G Ninja
+    
+    ninja -C $CMAKE_BUILD_DIR wolf
+    ninja -C $CMAKE_BUILD_DIR fake-udev
+    
+    # 复制构建产物
+    cp $CMAKE_BUILD_DIR/src/moonlight-server/wolf /wolf/wolf
     cp $CMAKE_BUILD_DIR/src/fake-udev/fake-udev /wolf/fake-udev
+_BUILD
 
 ########################################################
 FROM $BASE_IMAGE AS runner
