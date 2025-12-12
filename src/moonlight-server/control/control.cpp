@@ -156,6 +156,24 @@ void run_control(int port,
         logs::log(logs::debug, "[ENET] Client not found for session: {}", ev->session_id);
       });
 
+    // 添加 PauseStreamEvent 处理器
+    auto pause_ev = event_bus->register_handler<immer::box<PauseStreamEvent>>(
+      [&connected_clients](const immer::box<PauseStreamEvent> &ev) {
+        auto terminate_pkt = ControlTerminatePacket{};
+        std::string plaintext = {(char *)&terminate_pkt, sizeof(terminate_pkt)};
+        for (auto &[peer, session] : *connected_clients.load()) {
+          if (session->session_id == ev->session_id && session->rtsp_fake_ip == ev->rtsp_fake_ip) {
+            immer::box<std::shared_ptr<ENetPeer>> enet_client = {to_shared_ptr(peer)};
+            encrypt_and_send(plaintext, session->aes_key, enet_client);
+            logs::log(logs::info, "[ENET] Sent termination packet to pause session: {}, rtsp_fake_ip: {}", 
+                      ev->session_id, ev->rtsp_fake_ip);
+            return;
+          }
+        }
+        logs::log(logs::debug, "[ENET] Client not found for pause session: {}, rtsp_fake_ip: {}", 
+                  ev->session_id, ev->rtsp_fake_ip);
+      });
+
   while (true) {
     if (enet_host_service(host.get(), &event, timeout.count()) > 0) {
       auto [client_ip, client_port] = get_ip((sockaddr *)&event.peer->address.address);
