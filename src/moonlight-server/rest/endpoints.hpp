@@ -453,6 +453,12 @@ void resume(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTPS>::
     new_session->pen_tablet = std::move(old_session->pen_tablet);
     new_session->touch_screen = std::move(old_session->touch_screen);
 
+    // resume 时停掉旧的 session pipeline
+    logs::log(logs::info, "[HTTPS] Pausing old session pipeline: {}", old_session->session_id);
+    state->event_bus->fire_event(immer::box<events::PauseStreamEvent>(events::PauseStreamEvent{
+      .session_id = old_session->session_id,
+      .rtsp_fake_ip = old_session->rtsp_fake_ip}));
+
     state->running_sessions->update([&old_session, new_session](const immer::vector<events::StreamSession> ses_v) {
       return state::remove_session(ses_v, old_session.value()).push_back(*new_session);
     });
