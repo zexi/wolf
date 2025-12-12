@@ -1,287 +1,257 @@
 # AI Debug 文档
 
-## 多客户端共享流 + 独立 Session 设计
 
-### 需求
-1. **不同客户端能够共享出流**：多个客户端观看同一个视频/音频流，避免重复编码
-2. **每个客户端是单独的 session**：每个客户端有独立的输入设备、显示设置等
+## 复用 Lobbies 实现多 Session 复用出流
 
-### 当前架构分析
+### 目标
+- 移除 `resume` 中的 `SwitchStreamProducerEvents` 步骤
+- 复用 lobbies 的代码和机制来实现多 session 复用出流
+- 避免重复实现相同逻辑
 
-#### 现有结构
-- `StreamSession`: 包含所有会话信息（显示模式、音频通道、输入设备、wayland display、audio sink 等）
-- `VideoSession`: 从 `StreamSession` 创建，管理视频编码和发送到特定 `client_ip:client_port`
-- `AudioSession`: 从 `StreamSession` 创建，管理音频编码和发送到特定 `client_ip:client_port`
-- 每个 session 都有独立的 video/audio pipeline，直接发送到客户端
+### 当前问题分析
 
-#### 问题
-- 每个客户端创建独立的 session，导致重复编码（浪费 CPU/GPU）
-- 无法实现真正的流共享
+#### Resume 当前实现的问题
+在 `src/moonlight-server/rest/endpoints.hpp:456-460` 中，resume 直接调用 `SwitchStreamProducerEvents`：
+- **时机不对**：consumer pipeline 可能还未创建，handler 可能未注册，事件可能丢失
+- **逻辑重复**：lobbies 已经实现了相同的流复用机制，不应该重复实现
 
-### 设计方案
+#### Lobbies 的实现机制
+Lobbies 通过以下方式实现流复用：
+1. **CreateLobbyEvent**: 创建共享的 producer pipeline（使用 `lobby->id` 作为 interpipe 名称）
+2. **JoinLobbyEvent**: 让 session 加入 lobby，通过 `SwitchStreamProducerEvents` 切换流源到 `lobby->id`
+3. **LeaveLobbyEvent**: 让 session 离开 lobby，切换回自己的流源
 
-#### 架构分离
+Lobbies 的 handler (`src/moonlight-server/sessions/lobbies.cpp`) 已经实现了：
+- 流切换逻辑（`SwitchStreamProducerEvents`）
+- 输入设备切换（mouse、keyboard、touch_screen、joypads）
+- 生命周期管理（自动停止 lobby 当所有人离开时）
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                  StreamSession (共享)                    │
-│  - wayland_display (共享)                                │
-│  - audio_sink (共享)                                      │
-│  - video_context (共享)                                   │
-│  - video_producer_pipeline (共享，只编码一次)            │
-│  - audio_producer_pipeline (共享，只编码一次)            │
-│  - display_mode (主客户端设置)                           │
-│  - app (共享)                                             │
-└─────────────────────────────────────────────────────────┘
-                        │
-                        │ 1:N
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-┌───────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐
-│ClientSession1│ │ClientSession2│ │ClientSession3│
-│              │ │              │ │              │
-│- session_id  │ │- session_id  │ │- session_id  │
-│- client_ip   │ │- client_ip   │ │- client_ip   │
-│- mouse       │ │- mouse       │ │- mouse       │
-│- keyboard    │ │- keyboard    │ │- keyboard    │
-│- joypads     │ │- joypads     │ │- joypads     │
-│- display_mode│ │- display_mode│ │- display_mode│
-│- video_sink  │ │- video_sink  │ │- video_sink  │
-│- audio_sink  │ │- audio_sink  │ │- audio_sink  │
-└──────────────┘ └──────────────┘ └──────────────┘
-```
+### 实现方案
 
-#### 数据结构设计
+#### 方案：使用隐式 Lobby 复用流
 
-##### 1. StreamSession (共享流会话)
-```cpp
-struct StreamSession {
-  // 共享资源
-  std::shared_ptr<immer::atom<virtual_display::wl_state_ptr>> wayland_display;
-  std::shared_ptr<immer::atom<std::shared_ptr<audio::VSink>>> audio_sink;
-  std::shared_ptr<immer::atom<gst_video_context::gst_context_ptr>> video_context;
-  
-  // 应用信息
-  std::shared_ptr<App> app;
-  std::string app_local_state_folder;
-  std::string app_host_state_folder;
-  
-  // 流配置（主客户端设置，其他客户端可能需要适配）
-  moonlight::DisplayMode primary_display_mode;  // 主客户端显示模式
-  int audio_channel_count;
-  
-  // 编码 pipeline（共享，只创建一次）
-  std::shared_ptr<GstElement> video_producer_pipeline;  // 视频编码 pipeline
-  std::shared_ptr<GstElement> audio_producer_pipeline;  // 音频编码 pipeline
-  
-  // 客户端列表
-  std::shared_ptr<immer::atom<immer::vector<ClientSession>>> connected_clients;
-  
-  // 流会话 ID
-  std::size_t stream_session_id;
-};
-```
-
-##### 2. ClientSession (客户端会话)
-```cpp
-struct ClientSession {
-  // 客户端标识
-  std::size_t session_id;  // 唯一的客户端 session ID
-  std::string client_ip;
-  std::string rtsp_fake_ip;
-  
-  // 加密密钥（每个客户端独立）
-  std::string aes_key;
-  std::string aes_iv;
-  std::array<char, 16> rtp_secret_payload;
-  uint32_t enet_secret_payload;
-  
-  // 输入设备（每个客户端独立）
-  std::shared_ptr<std::optional<MouseTypes>> mouse;
-  std::shared_ptr<std::optional<KeyboardTypes>> keyboard;
-  std::shared_ptr<std::optional<TouchScreenTypes>> touch_screen;
-  std::shared_ptr<immer::atom<JoypadList>> joypads;
-  std::shared_ptr<std::optional<input::PenTablet>> pen_tablet;
-  
-  // 客户端设置
-  immer::box<wolf::config::ClientSettings> client_settings;
-  
-  // 显示模式（客户端可能要求不同的分辨率/帧率）
-  moonlight::DisplayMode display_mode;
-  
-  // 流端口
-  unsigned short video_stream_port;
-  unsigned short audio_stream_port;
-  unsigned short control_stream_port;
-  
-  // 关联的流会话
-  std::size_t stream_session_id;
-  
-  // UDP sockets（每个客户端独立）
-  std::shared_ptr<udp::socket> video_socket;
-  std::shared_ptr<udp::socket> audio_socket;
-};
-```
-
-#### 流分发机制
-
-##### 视频流分发
-1. **Producer Pipeline**（共享，只创建一次）：
-   ```
-   waylandsrc -> video/x-raw -> encoder -> interpipesink name="stream_{stream_session_id}_video"
-   ```
-
-2. **Consumer Pipelines**（每个客户端一个）：
-   ```
-   interpipesrc listen-to="stream_{stream_session_id}_video" -> 
-   videoconvertscale (如果需要适配分辨率) -> 
-   rtpmoonlightpay -> 
-   appsink -> UDP发送到 client_ip:client_port
-   ```
-
-##### 音频流分发
-1. **Producer Pipeline**（共享，只创建一次）：
-   ```
-   pulsesrc device="virtual_sink_{stream_session_id}.monitor" -> 
-   audio/x-raw -> 
-   opusenc -> 
-   interpipesink name="stream_{stream_session_id}_audio"
-   ```
-
-2. **Consumer Pipelines**（每个客户端一个）：
-   ```
-   interpipesrc listen-to="stream_{stream_session_id}_audio" -> 
-   rtpmoonlightpay_audio -> 
-   appsink -> UDP发送到 client_ip:client_port
-   ```
-
-#### 关键实现点
-
-##### 1. Session 创建流程
-
-**第一个客户端（创建流会话）**：
-```
-launch/resume -> 
-  检查是否存在 stream_session_id（通过 app 或其他标识） ->
-  不存在 -> 创建 StreamSession + ClientSession ->
-  启动 video_producer_pipeline 和 audio_producer_pipeline ->
-  启动该客户端的 consumer pipelines
-```
-
-**后续客户端（加入现有流会话）**：
-```
-launch/resume -> 
-  检查是否存在 stream_session_id ->
-  存在 -> 创建新的 ClientSession，关联到现有 StreamSession ->
-  启动该客户端的 consumer pipelines（复用 producer pipelines）
-```
-
-##### 2. 流会话管理
-
-- **StreamSession 查找**：通过 `app_id` 或其他标识查找现有的 `StreamSession`
-- **StreamSession 生命周期**：当最后一个客户端断开时，销毁 `StreamSession` 和 producer pipelines
-- **客户端管理**：维护 `StreamSession.connected_clients` 列表
-
-##### 3. 显示模式适配
-
-- **主客户端**：设置 `StreamSession.primary_display_mode`
-- **其他客户端**：如果要求不同的分辨率/帧率，在 consumer pipeline 中使用 `videoconvertscale` 适配
-- **限制**：所有客户端共享同一个 wayland display，所以实际渲染分辨率是主客户端的设置
-
-##### 4. 输入处理
-
-- 每个客户端有独立的输入设备（mouse、keyboard 等）
-- 所有输入都发送到同一个 wayland display（共享）
-- 需要处理输入冲突（例如多个鼠标同时移动）
-
-##### 5. RTSP 匹配
-
-- 每个 `ClientSession` 有独立的 `rtsp_fake_ip`
-- RTSP 请求通过 `rtsp_fake_ip` 匹配到对应的 `ClientSession`
-- 从 `ClientSession` 获取关联的 `StreamSession`
-
-##### 6. ENET 控制流
-
-- 每个客户端有独立的 ENET 连接
-- 控制消息（输入、IDR 请求等）路由到对应的 `ClientSession`
-- IDR 请求应该触发所有 consumer pipelines 的 IDR（如果需要）
-
-#### 需要修改的文件
-
-1. **`src/moonlight-server/events/events.hpp`**：
-   - 添加 `ClientSession` 结构
-   - 修改 `StreamSession` 结构（分离共享资源和客户端特定资源）
-
-2. **`src/moonlight-server/state/sessions.hpp`**：
-   - 添加 `create_stream_session()` 和 `create_client_session()` 函数
-   - 修改 session 查找逻辑
-
-3. **`src/moonlight-server/rest/endpoints.hpp`**：
-   - 修改 `launch()` 和 `resume()` 函数，支持查找/创建 `StreamSession`
-   - 修改 session 管理逻辑
-
-4. **`src/moonlight-server/streaming/streaming.cpp`**：
-   - 修改 `start_streaming_video()` 和 `start_streaming_audio()`，支持 producer/consumer 模式
-   - 实现流分发机制
-
-5. **`src/moonlight-server/rtsp/net.hpp`**：
-   - 修改 `get_session()`，通过 `rtsp_fake_ip` 匹配 `ClientSession`
-
-6. **`src/moonlight-server/control/control.cpp`**：
-   - 修改 ENET 连接处理，关联到 `ClientSession`
-
-7. **`src/moonlight-server/sessions/moonlight.cpp`**：
-   - 修改事件处理，支持 producer/consumer 模式
+使用基于 app 的隐式 lobby：
+- **第一次 launch 时**：检查是否存在基于 `app_id` 的 lobby，如果不存在则创建隐式 lobby
+- **后续 launch/resume 时**：让 session 加入已存在的隐式 lobby
+- 完全复用 lobbies 的 join/leave 逻辑
 
 #### 实现步骤
 
-1. **Phase 1: 数据结构重构**
-   - 定义 `ClientSession` 结构
-   - 重构 `StreamSession` 结构
-   - 更新所有相关的类型定义
+##### 步骤 1：移除 resume 中的 SwitchStreamProducerEvents
+**文件**: `src/moonlight-server/rest/endpoints.hpp`
+- 删除第 456-460 行的 `SwitchStreamProducerEvents` 调用
 
-2. **Phase 2: Session 管理**
-   - 实现 `StreamSession` 查找和创建逻辑
-   - 实现 `ClientSession` 创建和关联逻辑
-   - 实现 session 生命周期管理
+##### 步骤 2：在 launch 时创建隐式 Lobby
+**文件**: `src/moonlight-server/rest/endpoints.hpp` (launch 函数)
 
-3. **Phase 3: 流分发**
-   - 实现 producer pipeline（共享）
-   - 实现 consumer pipeline（每个客户端）
-   - 实现流分发机制
+在 launch 时（第一次启动应用）：
+1. 查找是否存在基于 `app->base.id` 的 lobby
+   - Lobby ID 格式：`fmt::format("app_{}", app_id)`
+2. 如果不存在，创建一个隐式 lobby（复用 `CreateLobbyEvent`）
+   - 使用 `app` 的配置（video_settings、audio_settings 等）
+   - 从 request headers 获取 display_mode、audio_channel_count 等
+   - 设置 `multi_user = true`，`stop_when_everyone_leaves = true`
+3. 如果存在，让 new_session 加入该 lobby（复用 `JoinLobbyEvent`）
 
-4. **Phase 4: 输入处理**
-   - 确保每个客户端有独立的输入设备
-   - 处理输入冲突
+##### 步骤 3：在 resume 时加入已存在的 Lobby
+**文件**: `src/moonlight-server/rest/endpoints.hpp` (resume 函数)
 
-5. **Phase 5: 测试和优化**
-   - 测试多客户端连接
-   - 测试流共享
-   - 性能优化
+在 resume 时（恢复之前的 session）：
+1. 查找基于 `old_session->app->base.id` 的 lobby
+   - Lobby ID 格式：`fmt::format("app_{}", app_id)`
+2. 如果 lobby 存在，让 new_session 加入该 lobby（复用 `JoinLobbyEvent`）
+3. 如果 lobby 不存在（异常情况），记录警告日志
 
-#### 注意事项
+##### 步骤 4：复用 Lobbies 的 Handler
+**文件**: `src/moonlight-server/sessions/lobbies.cpp`
+- **无需修改**，lobbies 的 handler 已经处理了 `JoinLobbyEvent` 和 `CreateLobbyEvent`
+- 这些 handler 会自动处理：
+  - 流切换（`SwitchStreamProducerEvents`）
+  - 输入设备切换（mouse、keyboard、touch_screen、joypads）
+  - 生命周期管理
 
-1. **显示模式冲突**：所有客户端共享同一个 wayland display，实际渲染分辨率是主客户端的设置。其他客户端如果需要不同分辨率，需要在 consumer pipeline 中缩放。
+##### 步骤 5：处理 Session 生命周期
+**文件**: `src/moonlight-server/rest/endpoints.hpp` (launch 和 resume 函数)
+- 在创建 new_session 后，触发 `JoinLobbyEvent` 而不是直接调用 `SwitchStreamProducerEvents`
+- 让 lobbies 的 handler 处理所有切换逻辑
 
-2. **音频混音**：如果多个客户端同时输出音频，可能需要混音处理。
+### 具体实现细节
 
-3. **性能考虑**：
-   - Producer pipeline 只创建一次，节省编码资源
-   - Consumer pipelines 只做格式转换和打包，开销较小
-   - 需要监控 producer pipeline 的性能
+#### 1. 修改 launch 函数（创建隐式 Lobby）
 
-4. **错误处理**：
-   - Producer pipeline 失败时，所有客户端都会受影响
-   - 需要实现 producer pipeline 的重启机制
+```cpp
+void launch(...) {
+  // ... 现有代码 ...
+  
+  auto app = state::get_moonlight_app_by_id(...);
+  auto new_session = create_run_session(...);
+  
+  // 查找或创建基于 app 的隐式 lobby
+  auto app_id = app->base.id;
+  auto lobby_id = fmt::format("app_{}", app_id);
+  
+  auto lobbies = state->lobbies->load();
+  auto existing_lobby = state::get_lobby_by_id(lobbies.get(), lobby_id);
+  
+  if (!existing_lobby) {
+    // 第一次 launch，创建隐式 lobby（复用 CreateLobbyEvent）
+    auto display_mode_str = utils::split(get_header(headers, "mode").value_or("1920x1080x60"), 'x');
+    auto surround_info = std::stoi(get_header(headers, "surroundAudioInfo").value_or("196610"));
+    int channelCount = surround_info & (0xffff);
+    
+    auto create_lobby_ev = events::CreateLobbyEvent{
+      .id = lobby_id,
+      .name = fmt::format("Implicit lobby for {}", app_id),
+      .profile_id = "",  // 隐式 lobby 不需要 profile
+      .icon_png_path = app->base.icon_png_path,
+      .multi_user = true,
+      .stop_when_everyone_leaves = true,
+      .pin = std::nullopt,
+      .video_settings = {
+        .width = std::stoi(display_mode_str[0].data()),
+        .height = std::stoi(display_mode_str[1].data()),
+        .refresh_rate = std::stoi(display_mode_str[2].data()),
+        .wayland_render_node = app->render_node,
+        .runner_render_node = app->render_node,
+        .video_producer_buffer_caps = app->video_producer_buffer_caps
+      },
+      .audio_settings = {
+        .channel_count = channelCount
+      },
+      .client_settings = current_client.settings,
+      .runner_state_folder = new_session->app_local_state_folder,
+      .runner = app->runner
+    };
+    state->event_bus->fire_event(immer::box<events::CreateLobbyEvent>(create_lobby_ev));
+    
+    // 等待 lobby 创建完成（可选，异步处理）
+    // create_lobby_ev.on_setup_over->get_future().wait();
+  }
+  
+  // 让 new_session 加入 lobby（复用 JoinLobbyEvent）
+  // lobbies 的 handler 会自动处理流切换、输入设备切换等
+  auto join_lobby_ev = events::JoinLobbyEvent{
+    .lobby_id = lobby_id,
+    .moonlight_session_id = new_session->session_id,
+    .pin = std::nullopt
+  };
+  state->event_bus->fire_event(immer::box<events::JoinLobbyEvent>(join_lobby_ev));
+  
+  // 等待加入完成并检查错误（可选，异步处理）
+  // auto error_msg = join_lobby_ev.error_message->get_future().get();
+  // if (!error_msg.empty()) {
+  //   logs::log(logs::error, "[LAUNCH] Failed to join lobby: {}", error_msg);
+  // }
+  
+  // ... 现有代码：触发 StreamSession 事件、更新 running_sessions ...
+}
+```
 
-5. **流控制**：
-   - 暂停/恢复应该影响所有客户端
-   - 客户端断开时，只销毁该客户端的 consumer pipelines
+#### 2. 修改 resume 函数（加入已存在的 Lobby）
 
-#### 扩展功能（可选）
+```cpp
+void resume(...) {
+  auto old_session = state::get_session_by_client(...);
+  if (old_session) {
+    auto new_session = create_run_session(...);
+    
+    // 移除 SwitchStreamProducerEvents 调用（第 456-460 行）
+    
+    // 查找基于 app 的隐式 lobby（应该已经存在）
+    auto app_id = old_session->app->base.id;
+    auto lobby_id = fmt::format("app_{}", app_id);
+    
+    auto lobbies = state->lobbies->load();
+    auto existing_lobby = state::get_lobby_by_id(lobbies.get(), lobby_id);
+    
+    if (existing_lobby) {
+      // Lobby 已存在，让 new_session 加入（复用 JoinLobbyEvent）
+      auto join_lobby_ev = events::JoinLobbyEvent{
+        .lobby_id = lobby_id,
+        .moonlight_session_id = new_session->session_id,
+        .pin = std::nullopt
+      };
+      state->event_bus->fire_event(immer::box<events::JoinLobbyEvent>(join_lobby_ev));
+      
+      // 等待加入完成并检查错误（可选）
+      // auto error_msg = join_lobby_ev.error_message->get_future().get();
+      // if (!error_msg.empty()) {
+      //   logs::log(logs::error, "[RESUME] Failed to join lobby: {}", error_msg);
+      // }
+    } else {
+      // Lobby 不存在（异常情况），记录警告
+      logs::log(logs::warning, "[RESUME] Lobby {} not found for app {}, session will use its own stream", 
+                lobby_id, app_id);
+    }
+    
+    // 更新 running_sessions
+    state->running_sessions->update([&old_session, new_session](...) {
+      return state::remove_session(ses_v, old_session.value()).push_back(*new_session);
+    });
+  }
+}
+```
 
-1. **动态分辨率切换**：允许主客户端切换分辨率，其他客户端自动适配
-2. **客户端优先级**：某些客户端可以优先使用资源
-3. **流质量自适应**：根据网络状况调整流质量
-4. **多显示器支持**：不同客户端可以观看不同的显示器
+#### 2. 复用 Lobbies 的代码
+
+关键复用点：
+- **`JoinLobbyEvent` handler** (`lobbies.cpp:176-236`): 
+  - 自动处理 `SwitchStreamProducerEvents`（第 232-234 行）
+  - 自动切换输入设备到 lobby 的 wayland_display（第 204-208 行）
+  - 自动处理 joypads 的切换（第 210-229 行）
+
+- **`CreateLobbyEvent` handler** (`lobbies.cpp:73-173`):
+  - 自动创建 producer pipeline（第 96-106 行）
+  - 自动创建 wayland_display（第 108-148 行）
+  - 自动创建 audio_sink（第 151-172 行）
+
+- **`LeaveLobbyEvent` handler** (`lobbies.cpp:239-254`):
+  - 自动处理离开逻辑
+  - 自动切换回 session 自己的流源
+
+#### 3. 生命周期管理
+
+- 当最后一个 session 离开时，lobby 自动停止（如果设置了 `stop_when_everyone_leaves = true`）
+- 完全复用 lobbies 的生命周期管理逻辑（`lobbies.cpp:257-282`）
+
+### 优势
+
+1. **代码复用**: 完全复用 lobbies 的代码，不重复实现
+2. **逻辑一致**: 使用相同的事件机制和 handler
+3. **维护简单**: 流复用逻辑集中在一个地方（lobbies.cpp）
+4. **功能完整**: 自动获得 lobbies 的所有功能（输入切换、设备管理等）
+
+### 注意事项
+
+1. **Lobby ID 生成**: 确保基于 `app_id` 的 `lobby_id` 是唯一的
+2. **Session 替换**: resume 时 `old_session` 会被 `new_session` 替换，需要确保 lobby 中的 `session_id` 更新
+3. **隐式 Lobby**: 这些 lobby 是隐式的（不通过 API 创建），但使用相同的机制
+4. **Lobby 创建时机**: 可能需要等待 lobby 创建完成后再加入，或者使用异步方式
+
+### 需要修改的文件
+
+1. **`src/moonlight-server/rest/endpoints.hpp`**: 
+   - 移除 `SwitchStreamProducerEvents` 调用（第 456-460 行）
+   - 添加 lobby 查找/创建逻辑
+   - 添加 `JoinLobbyEvent` 触发
+
+2. **`src/moonlight-server/state/sessions.hpp`** (可选):
+   - 可能需要添加基于 `app_id` 查找 lobby 的辅助函数
+
+### 不需要修改的文件
+
+- **`src/moonlight-server/sessions/lobbies.cpp`**: 完全复用现有代码
+- **`src/moonlight-server/streaming/streaming.cpp`**: 流切换逻辑已存在
+- **`src/moonlight-server/events/events.hpp`**: 事件定义已存在
+
+### 实现检查清单
+
+- [ ] 移除 `resume` 函数中的 `SwitchStreamProducerEvents` 调用
+- [ ] 在 `launch` 函数中实现基于 `app_id` 的 lobby 查找逻辑
+- [ ] 在 `launch` 函数中实现隐式 lobby 创建（复用 `CreateLobbyEvent`）
+- [ ] 在 `launch` 函数中实现 session 加入 lobby（复用 `JoinLobbyEvent`）
+- [ ] 在 `resume` 函数中实现 lobby 查找和加入逻辑
+- [ ] 测试 launch 功能是否正常工作（创建 lobby 和加入）
+- [ ] 测试 resume 功能是否正常工作（加入已存在的 lobby）
+- [ ] 测试多个 session 是否能正确复用流
+- [ ] 测试 session 离开时 lobby 是否正确清理

@@ -87,10 +87,15 @@ setup_moonlight_handlers(const immer::box<state::AppState> &app_state,
         plugged_devices_queue->update(
             [=](const session_devices map) { return map.set(std::to_string(session->session_id), devices_q); });
 
+        // 检查 session 是否在 lobby 中，如果在就不创建 producer pipeline（使用 lobby 的 producer）
+        auto lobbies = app_state->lobbies->load();
+        auto lobby = state::get_lobby_by_connected_session(lobbies.get(), std::to_string(session->session_id));
+        bool is_in_lobby = lobby.has_value();
+
         std::shared_ptr<boost::promise<streaming::WaylandDisplayReady>> on_ready =
             std::make_shared<boost::promise<streaming::WaylandDisplayReady>>();
 
-        if (session->app->start_virtual_compositor) {
+        if (session->app->start_virtual_compositor && !is_in_lobby) {
           logs::log(logs::debug, "[STREAM_SESSION] Create wayland compositor");
 
           // Start Gstreamer producer pipeline
@@ -105,6 +110,26 @@ setup_moonlight_handlers(const immer::box<state::AppState> &app_state,
                                             on_ready,
                                             session->event_bus);
           }).detach();
+        } else if (is_in_lobby) {
+          logs::log(logs::debug, "[STREAM_SESSION] Session {} is in lobby {}, skipping producer pipeline creation",
+                    session->session_id,
+                    lobby->id);
+          // Session 在 lobby 中，使用 lobby 的 wayland display
+          auto wl_state_ptr = lobby->wayland_display->load();
+          if (wl_state_ptr.get() != nullptr) {
+            session->wayland_display->store(wl_state_ptr);
+            // 从 WaylandState 获取 socket name
+            auto socket_name = virtual_display::get_wayland_socket_name(*(wl_state_ptr.get()));
+            // wayland_plugin 在 WaylandState 中不可直接访问，但后续代码会从 session->wayland_display 获取
+            // 这里先设置为空，后续代码会正确处理
+            on_ready->set_value({.wayland_socket_name = socket_name, .wayland_plugin = nullptr});
+          } else {
+            // Lobby 的 wayland display 还没准备好，等待
+            logs::log(logs::warning,
+                      "[STREAM_SESSION] Lobby {} wayland display not ready yet, session may not work correctly",
+                      lobby->id);
+            on_ready->set_value({});
+          }
         } else {
           // Create virtual devices
           auto mouse = input::Mouse::create();
@@ -134,44 +159,81 @@ setup_moonlight_handlers(const immer::box<state::AppState> &app_state,
         }
 
         /* Create audio virtual sink */
-        logs::log(logs::debug, "[STREAM_SESSION] Create virtual audio sink");
-        auto pulse_sink_name = fmt::format("virtual_sink_{}", session->session_id);
-        std::shared_ptr<audio::VSink> v_device;
-        if (session->app->start_audio_server && audio_server && audio_server->server) {
-          v_device = audio::create_virtual_sink(
-              audio_server->server,
-              audio::AudioDevice{.sink_name = pulse_sink_name,
-                                 .mode = state::get_audio_mode(session->audio_channel_count, true)});
-          session->audio_sink->store(v_device);
+        // 如果 session 在 lobby 中，使用 lobby 的 audio sink，不创建自己的
+        if (!is_in_lobby) {
+          logs::log(logs::debug, "[STREAM_SESSION] Create virtual audio sink");
+          auto pulse_sink_name = fmt::format("virtual_sink_{}", session->session_id);
+          std::shared_ptr<audio::VSink> v_device;
+          if (session->app->start_audio_server && audio_server && audio_server->server) {
+            v_device = audio::create_virtual_sink(
+                audio_server->server,
+                audio::AudioDevice{.sink_name = pulse_sink_name,
+                                   .mode = state::get_audio_mode(session->audio_channel_count, true)});
+            session->audio_sink->store(v_device);
 
-          std::thread([session, audio_server = audio_server->server]() {
-            auto sink_name = fmt::format("virtual_sink_{}.monitor", session->session_id);
-            streaming::start_audio_producer(std::to_string(session->session_id),
-                                            session->event_bus,
-                                            session->audio_channel_count,
-                                            sink_name,
-                                            audio::get_server_name(audio_server));
-          }).detach();
+            std::thread([session, audio_server = audio_server->server]() {
+              auto sink_name = fmt::format("virtual_sink_{}.monitor", session->session_id);
+              streaming::start_audio_producer(std::to_string(session->session_id),
+                                              session->event_bus,
+                                              session->audio_channel_count,
+                                              sink_name,
+                                              audio::get_server_name(audio_server));
+            }).detach();
+          }
+        } else {
+          logs::log(logs::debug,
+                    "[STREAM_SESSION] Session {} is in lobby {}, using lobby's audio sink",
+                    session->session_id,
+                    lobby->id);
+          // 使用 lobby 的 audio sink
+          auto lobby_audio_sink = lobby->audio_sink->load();
+          if (lobby_audio_sink.get() != nullptr) {
+            session->audio_sink->store(lobby_audio_sink);
+          }
         }
 
         // TODO: timeout? What if the wayland display is never ready?
         auto w_display_ready = on_ready->get_future().then([session](auto fut) {
           streaming::WaylandDisplayReady ready = fut.get();
 
-          auto wl_state = virtual_display::create_wayland_display(ready.wayland_plugin, ready.wayland_socket_name);
-          // Set the wayland display
-          session->wayland_display->store(wl_state);
+          // 如果 wayland_plugin 为空，说明 session 在 lobby 中，wayland_display 已经设置好了
+          if (ready.wayland_plugin == nullptr) {
+            // Session 在 lobby 中，使用已设置的 wayland_display
+            // 注意：虚拟设备应该已经由 JoinLobbyEvent handler 设置好了
+            // 这里只检查一下，如果还没有设置，就设置一下（防止时序问题）
+            auto wl_state = session->wayland_display->load();
+            if (wl_state.get() != nullptr) {
+              // 检查虚拟设备是否已经设置（JoinLobbyEvent handler 可能已经设置了）
+              if (!session->mouse->has_value()) {
+                session->mouse->emplace(virtual_display::WaylandMouse(wl_state));
+              }
+              if (!session->keyboard->has_value()) {
+                session->keyboard->emplace(virtual_display::WaylandKeyboard(wl_state));
+              }
+              if (!session->touch_screen->has_value()) {
+                session->touch_screen->emplace(virtual_display::WaylandTouchScreen(wl_state));
+              }
+            }
+            // Session 在 lobby 中，不需要启动自己的 runner（lobby 已经有 runner 了）
+            logs::log(logs::debug, "[STREAM_SESSION] Session {} is in lobby, skipping runner start", session->session_id);
+          } else {
+            // 正常流程：创建新的 wayland display
+            auto wl_state = virtual_display::create_wayland_display(ready.wayland_plugin, ready.wayland_socket_name);
+            // Set the wayland display
+            session->wayland_display->store(wl_state);
 
-          // Set virtual devices
-          session->mouse->emplace(virtual_display::WaylandMouse(wl_state));
-          session->keyboard->emplace(virtual_display::WaylandKeyboard(wl_state));
-          session->touch_screen->emplace(virtual_display::WaylandTouchScreen(wl_state));
+            // Set virtual devices
+            session->mouse->emplace(virtual_display::WaylandMouse(wl_state));
+            session->keyboard->emplace(virtual_display::WaylandKeyboard(wl_state));
+            session->touch_screen->emplace(virtual_display::WaylandTouchScreen(wl_state));
 
-          logs::log(logs::debug, "[STREAM_SESSION] Start runner");
-          session->event_bus->fire_event(immer::box<events::StartRunner>(
-              events::StartRunner{.stop_stream_when_over = true,
-                                  .runner = session->app->runner,
-                                  .stream_session = std::make_shared<events::StreamSession>(*session)}));
+            // 启动 session 自己的 runner
+            logs::log(logs::debug, "[STREAM_SESSION] Start runner");
+            session->event_bus->fire_event(immer::box<events::StartRunner>(
+                events::StartRunner{.stop_stream_when_over = true,
+                                    .runner = session->app->runner,
+                                    .stream_session = std::make_shared<events::StreamSession>(*session)}));
+          }
         });
       }));
 

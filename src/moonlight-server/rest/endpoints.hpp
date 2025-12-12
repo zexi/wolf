@@ -424,9 +424,54 @@ void launch(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTPS>::
   }
   auto client_ip = get_client_ip<SimpleWeb::HTTPS>(request);
   auto new_session = create_run_session(request->parse_query_string(), client_ip, current_client, state, app.value());
-  state->event_bus->fire_event(immer::box<events::StreamSession>(*new_session));
+
+  // 查找或创建基于 app 的隐式 lobby
+  auto app_id = app.value()->base.id;
+  auto lobby_id = fmt::format("app_{}", app_id);
+
+  auto lobbies = state->lobbies->load();
+  auto existing_lobby = state::get_lobby_by_id(lobbies.get(), lobby_id);
+
+  if (!existing_lobby) {
+    // 第一次 launch，创建隐式 lobby（复用 CreateLobbyEvent）
+    // 使用 new_session 中已经解析好的 display_mode 和 audio_channel_count，避免重新解析 headers
+    auto create_lobby_ev = events::CreateLobbyEvent{
+        .id = lobby_id,
+        .profile_id = "", // 隐式 lobby 不需要 profile
+        .name = fmt::format("Implicit lobby for {}", app_id),
+        .icon_png_path = app.value()->base.icon_png_path,
+        .pin = std::nullopt,
+        .multi_user = true,
+        .stop_when_everyone_leaves = true,
+        .video_settings = {.width = new_session->display_mode.width,
+                          .height = new_session->display_mode.height,
+                          .refresh_rate = new_session->display_mode.refreshRate,
+                          .wayland_render_node = app.value()->render_node,
+                          .runner_render_node = app.value()->render_node,
+                          .video_producer_buffer_caps = app.value()->video_producer_buffer_caps},
+        .audio_settings = {.channel_count = new_session->audio_channel_count},
+        .client_settings = current_client.settings,
+        .runner_state_folder = new_session->app_local_state_folder,
+        .runner = app.value()->runner};
+    state->event_bus->fire_event(immer::box<events::CreateLobbyEvent>(create_lobby_ev));
+    logs::log(logs::info, "[LAUNCH] Created implicit lobby {} for app {}", lobby_id, app_id);
+  }
+
+  // 先更新 running_sessions，确保 session 可以被找到
   state->running_sessions->update(
       [new_session](const immer::vector<events::StreamSession> &ses_v) { return ses_v.push_back(*new_session); });
+
+  // 让 new_session 加入 lobby（复用 JoinLobbyEvent）
+  // 必须在 StreamSession 事件之前触发，这样 StreamSession handler 可以检查 session 是否在 lobby 中
+  // lobbies 的 handler 会自动处理流切换、输入设备切换等
+  auto join_lobby_ev = events::JoinLobbyEvent{
+      .lobby_id = lobby_id, .moonlight_session_id = new_session->session_id, .pin = std::nullopt};
+  state->event_bus->fire_event(immer::box<events::JoinLobbyEvent>(join_lobby_ev));
+  logs::log(logs::info, "[LAUNCH] Session {} joining lobby {}", new_session->session_id, lobby_id);
+
+  // 触发 StreamSession 事件
+  // StreamSession handler 会检查 session 是否在 lobby 中，如果在就不创建 producer pipeline
+  state->event_bus->fire_event(immer::box<events::StreamSession>(*new_session));
 
   auto rtsp_ip = get_rtsp_ip_string(get_host_external_ip<SimpleWeb::HTTPS>(request, state), *new_session);
   auto xml = moonlight::launch_success(rtsp_ip, std::to_string(get_port(state::RTSP_SETUP_PORT)));
@@ -453,9 +498,37 @@ void resume(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTPS>::
     new_session->pen_tablet = std::move(old_session->pen_tablet);
     new_session->touch_screen = std::move(old_session->touch_screen);
 
+    // 先更新 running_sessions，确保 new_session 可以被找到
     state->running_sessions->update([&old_session, new_session](const immer::vector<events::StreamSession> ses_v) {
       return state::remove_session(ses_v, old_session.value()).push_back(*new_session);
     });
+
+    // 触发 StreamSession 事件
+    state->event_bus->fire_event(immer::box<events::StreamSession>(*new_session));
+
+    // 查找基于 app 的隐式 lobby（应该已经存在）
+    auto app_id = old_session->app->base.id;
+    auto lobby_id = fmt::format("app_{}", app_id);
+
+    auto lobbies = state->lobbies->load();
+    auto existing_lobby = state::get_lobby_by_id(lobbies.get(), lobby_id);
+
+    if (existing_lobby) {
+      // Lobby 已存在，让 new_session 加入（复用 JoinLobbyEvent）
+      // lobbies 的 handler 会自动处理流切换、输入设备切换等
+      auto join_lobby_ev = events::JoinLobbyEvent{
+          .lobby_id = lobby_id,
+          .moonlight_session_id = new_session->session_id,
+          .pin = std::nullopt};
+      state->event_bus->fire_event(immer::box<events::JoinLobbyEvent>(join_lobby_ev));
+      logs::log(logs::info, "[RESUME] Session {} joining lobby {}", new_session->session_id, lobby_id);
+    } else {
+      // Lobby 不存在（异常情况），记录警告
+      logs::log(logs::warning,
+                "[RESUME] Lobby {} not found for app {}, session will use its own stream",
+                lobby_id,
+                app_id);
+    }
 
     auto rtsp_ip = get_rtsp_ip_string(get_host_ip<SimpleWeb::HTTPS>(request, state), *new_session);
     auto xml = moonlight::launch_resume(rtsp_ip, std::to_string(get_port(state::RTSP_SETUP_PORT)));
