@@ -35,8 +35,8 @@ RUN --mount=type=cache,target=/cache/ccache \
         -DBUILD_TESTING=OFF \
         -G Ninja
     
-    ninja -C $CMAKE_BUILD_DIR wolf
-    ninja -C $CMAKE_BUILD_DIR fake-udev
+    ninja -j 10 -C $CMAKE_BUILD_DIR wolf
+    ninja -j 10 -C $CMAKE_BUILD_DIR fake-udev
     
     # 复制构建产物
     cp $CMAKE_BUILD_DIR/src/moonlight-server/wolf /wolf/wolf

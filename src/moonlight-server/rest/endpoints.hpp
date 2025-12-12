@@ -473,17 +473,29 @@ void cancel(const std::shared_ptr<typename SimpleWeb::Server<SimpleWeb::HTTPS>::
             const immer::box<state::AppState> &state) {
   log_req<SimpleWeb::HTTPS>(request);
 
-  auto client_session = state::get_session_by_client(state->running_sessions->load(), current_client);
-  if (client_session) {
-    state->event_bus->fire_event(
-        immer::box<events::StopStreamEvent>(events::StopStreamEvent{.session_id = client_session->session_id}));
+  // 获取该客户端下的所有 sessions
+  auto client_sessions = state::get_sessions_by_client(state->running_sessions->load(), current_client);
+  
+  if (!client_sessions.empty()) {
+    logs::log(logs::info, "[HTTPS] Canceling {} session(s) for client", client_sessions.size());
+    
+    // 停止所有 sessions
+    for (const auto &session : client_sessions) {
+      state->event_bus->fire_event(
+          immer::box<events::StopStreamEvent>(events::StopStreamEvent{.session_id = session.session_id}));
+    }
 
-    state->running_sessions->update([&client_session](const immer::vector<events::StreamSession> &ses_v) {
-      return state::remove_session(ses_v, client_session.value());
+    // 从 running_sessions 中移除所有 sessions
+    state->running_sessions->update([&client_sessions](const immer::vector<events::StreamSession> &ses_v) {
+      auto result = ses_v;
+      for (const auto &session : client_sessions) {
+        result = state::remove_session(result, session);
+      }
+      return result;
     });
   } else {
     auto client_ip = get_client_ip<SimpleWeb::HTTPS>(request);
-    logs::log(logs::warning, "[HTTPS] Received resume event from an unregistered session, ip: {}", client_ip);
+    logs::log(logs::warning, "[HTTPS] Received cancel event from an unregistered client, ip: {}", client_ip);
   }
 
   XML xml;
